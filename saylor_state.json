@@ -1,18 +1,10 @@
 {
-  "start_date": "2026-09-12",
-  "balas_usadas": 2,
-  "posicion_usd_acumulado": 533.34,
-  "posicion_btc_acumulado": 0.00690068,
+  "capital_total": null,
+  "start_date": null,
+  "balas_usadas": 0,
+  "posicion_usd_acumulado": 0.0,
+  "posicion_btc_acumulado": 0.0,
   "margen_extra_btc_acumulado": 0.0,
-  "log": [
-    {
-      "fecha": "2026-09-12T00:00:00+00:00",
-      "balas_confirmadas": 2,
-      "precio_confirmado": 77288.0,
-      "btc_depositado": 0.00690068,
-      "tipo": "posicion",
-      "nota": "carga inicial de apertura — BTC derivado del valor nominal de 2 balas (533.34 USD) al precio confirmado, igual que se calculará en cada recarga futura. Margen real reportado en su momento: 531 USDT (diferencia de ~2.34 USD por redondeo, no impacta el cálculo)."
-    }
-  ],
+  "log": [],
   "_previous_snapshot": null
 }
