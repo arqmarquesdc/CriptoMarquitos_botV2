@@ -72,7 +72,7 @@ BALA_SIZE = round(CAPITAL_TOTAL / MAX_BALAS, 2)  # 266.67
 LEVERAGE = 5
 TAKE_PROFIT_MIN_PCT = 15
 TAKE_PROFIT_MAX_PCT = 20
-LIMITES_TABLA = [0, -5, -10, -15, -40]  # umbrales de la tabla de recarga, para el aviso "cerca de un límite"
+LIMITES_TABLA = [0, -5, -10, -20, -40]  # umbrales de la tabla de recarga, para el aviso "cerca de un límite"
 CERCA_LIMITE_PCT = 1.0  # a menos de 1 punto porcentual de un límite, sugerir confirmar el ROI real
 
 SAYLOR_STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "saylor_state.json")
@@ -85,10 +85,17 @@ def balas_a_agregar(roi_pct):
     términos de BTC, contrato inverso — ver docstring del módulo). Devuelve
     (balas_a_la_posicion, balas_directo_al_margen) — el segundo valor solo es
     distinto de 0 en el caso crítico (ROI <= -40%).
+
+    Escalones (confirmados con la planilla "Michael Saylor.xlsx" de Marcos):
+    Positivo: 1 | hasta -5%: 2 | hasta -10%: 3 | de -10% a -20%: 4 |
+    desde -20%: 5 | crítica desde -40%: 3 a la posición + 3 a margen.
+    El tramo de -15% a -20% se extiende con el mismo valor que -10%/-15%
+    (4 balas) — la planilla no marca un escalón propio ahí, el próximo
+    escalón real es -20%, no -15%.
     """
     if roi_pct <= -40:
         return 3, 3
-    if roi_pct < -15:
+    if roi_pct <= -20:
         return 5, 0
     if roi_pct < -10:
         return 4, 0
