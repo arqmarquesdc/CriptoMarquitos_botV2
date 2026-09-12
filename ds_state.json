@@ -1,19 +1,10 @@
 {
-  "capital_total": 1200.0,
-  "balas_usadas": 1,
-  "log": [
-    {
-      "fecha": "2026-09-12T00:00:00+00:00",
-      "bala": 1,
-      "precio_entrada": 131.36,
-      "bala_size_usd": 600.0,
-      "trade_usd_teorico": 120.0,
-      "margen_usd_teorico": 480.0,
-      "margen_usdt_real": 598.09,
-      "tamano_mstr_real": 8.99,
-      "liquidacion_exchange": 66.20
-    }
-  ],
-  "_previous_snapshot": null,
-  "_alerta_rendimiento_activa": false
+  "capital_total": null,
+  "start_date": null,
+  "balas_usadas": 0,
+  "posicion_usd_acumulado": 0.0,
+  "posicion_btc_acumulado": 0.0,
+  "margen_extra_btc_acumulado": 0.0,
+  "log": [],
+  "_previous_snapshot": null
 }
