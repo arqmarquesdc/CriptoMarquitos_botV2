@@ -72,7 +72,7 @@ import re
 import json
 import copy
 import argparse
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 
 import requests
 
@@ -89,6 +89,11 @@ CERCA_LIMITE_PCT = 1.0  # a menos de 1 punto porcentual de un límite, sugerir c
 
 SAYLOR_STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "saylor_state.json")
 KRAKEN_OHLC_URL = "https://api.kraken.com/0/public/OHLC"
+_AR_TZ = timezone(timedelta(hours=-3))  # Argentina, sin horario de verano
+
+
+def _hora_actual_ar():
+    return datetime.now(_AR_TZ).strftime("%H:%M hs")
 
 
 def balas_a_agregar(roi_pct):
@@ -281,7 +286,7 @@ def format_daily_check_message(state, price):
 
     lines = [
         f"📅 *Estrategia Saylor BTC — {dia_txt}*",
-        f"Precio BTC/USD actual: ${price:,.2f} (Kraken)",
+        f"Precio BTC/USD actual: ${price:,.2f} (Kraken, {_hora_actual_ar()})",
         f"Promedio (contrato inverso): ${promedio_inverso:,.2f}",
         f"ROI estimado (BTC, contrato inverso): {roi:+.2f}%",
         f"Recarga sugerida: {recarga_txt}",
@@ -331,12 +336,14 @@ def format_status_message(state, price=None):
         f"Margen BTC total: {margen_total_btc:.8f} BTC",
         f"Liquidación estimada (aprox., no exacta): {'$' + format(liquidacion, ',.2f') if liquidacion else 's/d'}",
     ]
-    if price and promedio_inverso:
-        roi = estimar_roi_btc(price, promedio_inverso)
-        lines.append(f"ROI estimado ahora: {roi:+.2f}% (BTC a ${price:,.2f})")
-        nota = nota_cierre(roi)
-        if nota:
-            lines.append(nota)
+    if price:
+        lines.append(f"Precio BTC/USD actual: ${price:,.2f} (Kraken, {_hora_actual_ar()})")
+        if promedio_inverso:
+            roi = estimar_roi_btc(price, promedio_inverso)
+            lines.append(f"ROI estimado ahora: {roi:+.2f}%")
+            nota = nota_cierre(roi)
+            if nota:
+                lines.append(nota)
     if not promedio_inverso:
         lines.append("\nTodavía no arrancaste — mandá \"/saylor_iniciar <capital_total>\" para empezar.")
     log = state.get("log", [])
@@ -535,7 +542,7 @@ def format_inicio_message(result):
         f"Regla de Inicio: {result['balas_inicio']} balas de entrada.",
     ]
     if result.get("precio_actual"):
-        lines.append(f"Precio BTC/USD actual: ${result['precio_actual']:,.2f} (Kraken)")
+        lines.append(f"Precio BTC/USD actual: ${result['precio_actual']:,.2f} (Kraken, {_hora_actual_ar()})")
     margen_txt = f"Margen a depositar: USD {result['margen_usd']:,.2f}"
     if result.get("margen_btc"):
         margen_txt += f" ≈ {result['margen_btc']:.8f} BTC al precio actual"
