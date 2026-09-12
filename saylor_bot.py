@@ -1,4 +1,3 @@
-
 """
 Bot de seguimiento de la estrategia "Michael Saylor" BTC (long apalancado de
 largo plazo, con recargas diarias en base al ROI % no realizado).
@@ -321,18 +320,35 @@ def format_status_message(state, price=None):
 
 _BALAS_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*balas?", re.IGNORECASE)
 _PRECIO_RE = re.compile(
-    r"(?:a|precio(?:\s+de)?|en)\s*(?:usd\$?|u\$s|\$)?\s*([\d]{1,3}(?:[.,]\d{2,3})*(?:[.,]\d+)?)",
+    # Captura el número completo desde el primer dígito (con o sin
+    # separadores de miles/decimales) — antes se cortaba a los primeros 3
+    # dígitos si el precio no tenía puntos (ej. "77309" se leía como "773").
+    r"(?:a|precio(?:\s+de)?|en)\s*(?:usd\$?|u\$s|\$)?\s*(\d[\d.,]*)",
     re.IGNORECASE,
 )
 _MARGEN_EXTRA_HINT_RE = re.compile(r"directo al margen|solo margen|margen extra|margen colch[oó]n", re.IGNORECASE)
+
+_NUMERO_PALABRAS = {
+    "una": "1", "un": "1", "uno": "1", "dos": "2", "tres": "3", "cuatro": "4",
+    "cinco": "5", "seis": "6", "siete": "7", "ocho": "8", "nueve": "9", "diez": "10",
+}
+_NUMERO_PALABRAS_RE = re.compile(r"\b(" + "|".join(_NUMERO_PALABRAS.keys()) + r")\b", re.IGNORECASE)
+
+
+def _reemplazar_numeros_en_palabras(text):
+    """Convierte "dos balas" -> "2 balas" etc., para que el parser de
+    recargas entienda tanto dígitos como números escritos en letras."""
+    return _NUMERO_PALABRAS_RE.sub(lambda m: _NUMERO_PALABRAS[m.group(0).lower()], text)
 
 
 def parse_recarga_text(text):
     """
     Devuelve (balas, precio, es_margen_extra) si el texto parece una
-    confirmación de recarga ("Metí 2 balas a 77.450", "3 balas directo al
-    margen a 76900"), o None si no matchea el patrón esperado.
+    confirmación de recarga ("Metí 2 balas a 77.450", "Metí dos balas a
+    77450", "3 balas directo al margen a 76900"), o None si no matchea el
+    patrón esperado.
     """
+    text = _reemplazar_numeros_en_palabras(text)
     m_balas = _BALAS_RE.search(text)
     m_precio = _PRECIO_RE.search(text)
     if not m_balas or not m_precio:
