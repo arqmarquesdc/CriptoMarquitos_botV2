@@ -186,7 +186,20 @@ def load_saylor_state():
     state.setdefault("margen_extra_btc_acumulado", 0.0)
     state.setdefault("log", [])
     state.setdefault("_previous_snapshot", None)
+    state.setdefault("contador_operaciones", 0)  # para los ids MS-01, MS-02, ...
     return state
+
+
+def _siguiente_id_operacion(state):
+    """
+    Da el próximo id secuencial (MS-01, MS-02, ...). El contador vive DENTRO
+    del state, así que si se deshace una operación (que restaura el state
+    completo desde el snapshot previo) el contador también vuelve para atrás
+    — el próximo id real reutiliza el número que quedó libre, en vez de
+    seguir sumando huecos.
+    """
+    state["contador_operaciones"] = state.get("contador_operaciones", 0) + 1
+    return f"MS-{state['contador_operaciones']:02d}"
 
 
 def save_saylor_state(state):
@@ -287,6 +300,17 @@ def format_daily_check_message(state, price):
     return "\n".join(lines)
 
 
+def _format_log_line(entry):
+    eid = entry.get("id", "?")
+    tipo = entry.get("tipo")
+    if tipo == "cierre":
+        return (f"— {eid} (cierre): precio ${entry['precio_cierre']:,.2f}, "
+                f"ROI {entry['roi_pct']:+.2f}%, PnL {entry['pnl_btc']:+.8f} BTC")
+    etiqueta = "margen extra" if tipo == "margen_extra" else "posición"
+    return (f"— {eid} ({etiqueta}): {entry['balas_confirmadas']} balas a "
+            f"${entry['precio_confirmado']:,.2f} → {entry['btc_depositado']:.8f} BTC")
+
+
 def format_status_message(state, price=None):
     posicion_usd = state.get("posicion_usd_acumulado", 0.0)
     posicion_btc = state.get("posicion_btc_acumulado", 0.0)
@@ -315,6 +339,10 @@ def format_status_message(state, price=None):
             lines.append(nota)
     if not promedio_inverso:
         lines.append("\nTodavía no arrancaste — mandá \"/saylor_iniciar <capital_total>\" para empezar.")
+    log = state.get("log", [])
+    if log:
+        lines.append("\nHistorial (últimas 10):")
+        lines.extend(_format_log_line(e) for e in log[-10:])
     return "\n".join(lines)
 
 
@@ -400,7 +428,9 @@ def confirmar_recarga(state, balas_confirmadas, precio_confirmado, es_margen_ext
     if not state.get("start_date"):
         state["start_date"] = date.today().isoformat()
 
+    op_id = _siguiente_id_operacion(state)
     state.setdefault("log", []).append({
+        "id": op_id,
         "fecha": datetime.now(timezone.utc).isoformat(),
         "balas_confirmadas": balas_confirmadas,
         "precio_confirmado": precio_confirmado,
@@ -412,6 +442,7 @@ def confirmar_recarga(state, balas_confirmadas, precio_confirmado, es_margen_ext
 
     return {
         "ok": True,
+        "id": op_id,
         "tipo": "margen_extra" if es_margen_extra else "posicion",
         "btc_depositado": btc_depositado,
         "promedio_inverso": promedio_inverso,
@@ -422,14 +453,18 @@ def confirmar_recarga(state, balas_confirmadas, precio_confirmado, es_margen_ext
 
 
 def deshacer_ultima_recarga(state):
+    """Deshace la última operación (recarga o cierre) y devuelve la entry del
+    log que se deshizo (con su id), o None si no había nada para deshacer."""
     snapshot = state.get("_previous_snapshot")
     if not snapshot:
-        return False
+        return None
+    log = state.get("log", [])
+    deshecho = log[-1] if log else None
     restored = copy.deepcopy(snapshot)
     state.clear()
     state.update(restored)
     state["_previous_snapshot"] = None
-    return True
+    return deshecho
 
 
 def format_confirmacion_message(result):
@@ -438,7 +473,7 @@ def format_confirmacion_message(result):
 
     if result["tipo"] == "margen_extra":
         return (
-            f"✅ Listo, registrado como margen extra (colchón, no suma exposición).\n"
+            f"✅ {result['id']} registrada como margen extra (colchón, no suma exposición).\n"
             f"BTC depositado ahora: {result['btc_depositado']:.8f} BTC\n"
             f"Margen BTC total (posición + extra): {result['margen_total_btc']:.8f} BTC\n"
             f"Balas usadas: {result['balas_usadas']}/{MAX_BALAS} (restantes: {result['balas_restantes']})\n\n"
@@ -447,7 +482,7 @@ def format_confirmacion_message(result):
 
     promedio_txt = f"${result['promedio_inverso']:,.2f}" if result["promedio_inverso"] else "s/d"
     return (
-        f"✅ Listo, registrado.\n"
+        f"✅ {result['id']} registrada.\n"
         f"BTC depositado ahora: {result['btc_depositado']:.8f} BTC\n"
         f"Nuevo promedio (contrato inverso): {promedio_txt}\n"
         f"Margen BTC total: {result['margen_total_btc']:.8f} BTC\n"
@@ -543,7 +578,9 @@ def cerrar_estrategia(state, precio_cierre):
     balas_usadas_anteriores = state.get("balas_usadas", 0)
 
     state["_previous_snapshot"] = copy.deepcopy({k: v for k, v in state.items() if k != "_previous_snapshot"})
+    op_id = _siguiente_id_operacion(state)
     state.setdefault("log", []).append({
+        "id": op_id,
         "fecha": datetime.now(timezone.utc).isoformat(),
         "tipo": "cierre",
         "precio_cierre": precio_cierre,
@@ -561,6 +598,7 @@ def cerrar_estrategia(state, precio_cierre):
 
     return {
         "ok": True,
+        "id": op_id,
         "precio_cierre": precio_cierre,
         "promedio_inverso": promedio_inverso,
         "roi_pct": roi,
@@ -575,7 +613,7 @@ def format_cierre_message(result):
     if not result["ok"]:
         return f"🛑 {result['motivo']}"
     return (
-        f"🏁 *Estrategia MS cerrada*\n"
+        f"🏁 *{result['id']} — Estrategia MS cerrada*\n"
         f"Precio de cierre: ${result['precio_cierre']:,.2f}\n"
         f"Promedio de entrada (contrato inverso): ${result['promedio_inverso']:,.2f}\n"
         f"ROI final (BTC, contrato inverso): {result['roi_pct']:+.2f}%\n"
@@ -648,9 +686,10 @@ def handle_message(text):
 
     if lower in ("/deshacer", "/saylor_deshacer"):
         state = load_saylor_state()
-        if deshacer_ultima_recarga(state):
+        deshecho = deshacer_ultima_recarga(state)
+        if deshecho:
             save_saylor_state(state)
-            return "↩️ Deshecho — volvió al estado anterior a la última carga confirmada."
+            return f"↩️ Deshecho {deshecho.get('id', '?')} — volvió al estado anterior a esa operación."
         return "No hay nada para deshacer (no hay una carga previa registrada)."
 
     parsed = parse_recarga_text(stripped)
