@@ -1,0 +1,33 @@
+# Manda el chequeo diario de la estrategia Saylor BTC por Telegram (precio,
+# ROI estimado, recarga sugerida). Es de solo lectura sobre saylor_state.json
+# — no cambia nada, por eso no necesita un paso de git commit/push. El estado
+# solo cambia cuando Marcos confirma una recarga real por texto (eso lo
+# procesa el cron de 15 minutos de alertas_btc.yml, no este workflow).
+
+name: Chequeo diario Saylor BTC
+
+on:
+  schedule:
+    - cron: "0 12 * * *"  # 12:00 UTC = 09:00 America/Buenos_Aires (UTC-3 fijo, sin horario de verano)
+  workflow_dispatch: {}   # permite correrlo manualmente desde la pestaña Actions
+
+jobs:
+  daily-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Mandar chequeo diario
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python saylor_bot.py --daily-check
