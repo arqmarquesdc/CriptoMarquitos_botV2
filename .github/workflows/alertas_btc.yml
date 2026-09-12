@@ -1,0 +1,66 @@
+# Corre el bot cada 15 minutos usando GitHub Actions (gratis). En cada corrida
+# el script chequea H4, H1 y M15, procesa botones/comandos de Telegram, y solo
+# manda alerta si hay señal nueva.
+#
+# Nota: GitHub no garantiza precisión exacta en los cron schedules (puede
+# demorar unos minutos en horarios de mucha carga), pero para esta estrategia
+# no es un problema: igual detecta el cruce en cuanto corre.
+
+name: Alertas BTC + Estrategias MS y DS
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}  # permite correrlo manualmente desde la pestaña Actions
+
+permissions:
+  contents: write  # necesario para que el workflow pueda commitear el state.json
+
+jobs:
+  check-signal:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Ejecutar bot
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python bot_btc_h4.py
+
+      - name: Guardar estado y bitácora (evita alertas duplicadas, registra trades)
+        run: |
+          git config user.name "btc-alert-bot"
+          git config user.email "btc-alert-bot@users.noreply.github.com"
+          git add state.json trades.json saylor_state.json ds_state.json
+
+          if git diff --staged --quiet; then
+            echo "Sin cambios para commitear."
+            exit 0
+          fi
+
+          git commit -m "Actualiza estado y bitácora [skip ci]"
+
+          # Reintenta con rebase si el push es rechazado (dos corridas del cron
+          # pisándose, o un commit manual hecho al mismo tiempo desde GitHub).
+          for i in 1 2 3 4 5; do
+            if git push; then
+              echo "Push OK."
+              exit 0
+            fi
+            echo "Push rechazado (posible corrida en paralelo), reintentando ($i/5)..."
+            git pull --rebase --autostash origin main
+            sleep $((RANDOM % 10 + 5))
+          done
+
+          echo "No se pudo pushear después de varios intentos."
+          exit 1
