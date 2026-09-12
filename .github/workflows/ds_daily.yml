@@ -1,0 +1,66 @@
+# Chequea diariamente el rendimiento de la estrategia DS (MSTR, Bitget) y
+# avisa por Telegram si cruza el umbral de -40% definido. Usa stooq.com para
+# el precio de MSTR (gratis, sin API key) — si ese chequeo falla, avisa por
+# Telegram para hacerlo a mano con "/ds_chequeo <precio>".
+#
+# Esto SÍ puede cambiar ds_state.json (guarda si la alerta ya está activa,
+# para no repetirla en cada corrida), por eso tiene paso de git commit/push,
+# a diferencia de saylor_daily.yml y reporte_semanal.yml que son de solo
+# lectura.
+
+name: Chequeo diario DS (Doble Saylor)
+
+on:
+  schedule:
+    - cron: "0 13 * * *"  # 13:00 UTC = 10:00 America/Buenos_Aires
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  daily-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Mandar chequeo diario
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python ds_bot.py --daily-check
+
+      - name: Guardar estado (evita repetir la alerta)
+        run: |
+          git config user.name "btc-alert-bot"
+          git config user.email "btc-alert-bot@users.noreply.github.com"
+          git add ds_state.json
+
+          if git diff --staged --quiet; then
+            echo "Sin cambios para commitear."
+            exit 0
+          fi
+
+          git commit -m "Actualiza estado DS [skip ci]"
+
+          for i in 1 2 3 4 5; do
+            if git push; then
+              echo "Push OK."
+              exit 0
+            fi
+            echo "Push rechazado, reintentando ($i/5)..."
+            git pull --rebase --autostash origin main
+            sleep $((RANDOM % 10 + 5))
+          done
+
+          echo "No se pudo pushear después de varios intentos."
+          exit 1
