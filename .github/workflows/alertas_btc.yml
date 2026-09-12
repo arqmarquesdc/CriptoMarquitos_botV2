@@ -1,16 +1,18 @@
-# Corre el bot cada 15 minutos usando GitHub Actions (gratis). En cada corrida
-# el script chequea H4, H1 y M15, procesa botones/comandos de Telegram, y solo
-# manda alerta si hay señal nueva.
+# Corre el bot cada 5 minutos usando GitHub Actions (gratis, sin límite en
+# repos públicos). En cada corrida el script chequea H4, H1 y M15, procesa
+# botones/comandos/mensajes de Telegram (para que respondan rápido), y solo
+# manda alerta de trading si hay señal nueva.
 #
 # Nota: GitHub no garantiza precisión exacta en los cron schedules (puede
-# demorar unos minutos en horarios de mucha carga), pero para esta estrategia
-# no es un problema: igual detecta el cruce en cuanto corre.
+# demorar unos minutos más en horarios de mucha carga) — 5 minutos es el
+# intervalo mínimo real que soporta, no hay forma de que sea instantáneo sin
+# pasar a un servidor propio con webhook.
 
 name: Alertas BTC + Estrategias MS y DS
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/5 * * * *"  # cada 5 min (mínimo real de GitHub Actions) para que Telegram responda más rápido
   workflow_dispatch: {}  # permite correrlo manualmente desde la pestaña Actions
 
 permissions:
