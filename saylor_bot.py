@@ -48,6 +48,18 @@ que no entran en el cálculo de promedio_inverso ni de PnL — sí achican la
 distancia a liquidación, porque hay más margen total respaldando la misma
 exposición. Por eso se trackean aparte (`margen_extra_btc_acumulado`).
 
+=== Arrancar y cerrar la estrategia ===
+El capital total NO está fijo en el código — se define con
+"/saylor_iniciar <capital_total>", que calcula el tamaño de bala
+(capital/30) y la carga inicial (regla de "Inicio": 2 balas, no 1 como el
+resto de los días en ROI positivo). Rechaza si ya hay una posición abierta,
+para no pisar datos reales.
+
+"/saylor_cerrar <precio>" liquida la posición al precio dado: calcula
+ROI/PnL final, lo deja anotado en el log, y resetea los acumuladores para
+poder volver a arrancar más adelante. A partir de ROI +10% el bot ya
+empieza a sugerir evaluar el cierre (más fuerte desde +20%).
+
 Uso:
     python saylor_bot.py --daily-check   # manda el chequeo diario (solo lectura)
 
@@ -66,12 +78,12 @@ import requests
 
 from price_utils import parse_price_ar
 
-CAPITAL_TOTAL = 8000.0
+CAPITAL_TOTAL_DEFAULT = 8000.0  # fallback si por algún motivo state no tiene capital_total todavía
 MAX_BALAS = 30
-BALA_SIZE = round(CAPITAL_TOTAL / MAX_BALAS, 2)  # 266.67
+BALAS_INICIO = 2  # regla de "Inicio" de la planilla: la primera carga es 2 balas, no 1
 LEVERAGE = 5
-TAKE_PROFIT_MIN_PCT = 15
-TAKE_PROFIT_MAX_PCT = 20
+TAKE_PROFIT_MIN_PCT = 10  # desde acá, sugerir evaluar el cierre de la estrategia
+TAKE_PROFIT_MAX_PCT = 20  # zona ideal de cierre (recomendación más fuerte)
 LIMITES_TABLA = [0, -5, -10, -20, -40]  # umbrales de la tabla de recarga, para el aviso "cerca de un límite"
 CERCA_LIMITE_PCT = 1.0  # a menos de 1 punto porcentual de un límite, sugerir confirmar el ROI real
 
@@ -108,6 +120,22 @@ def balas_a_agregar(roi_pct):
 
 def cerca_de_limite(roi_pct, umbral=CERCA_LIMITE_PCT):
     return min(abs(roi_pct - l) for l in LIMITES_TABLA) < umbral
+
+
+def nota_cierre(roi_pct):
+    """
+    Sugerencia de evaluar el cierre de la estrategia cuando el ROI ya está en
+    zona de ganancia — pedido explícito de Marcos: a partir de +10% avisar
+    que es un buen momento para considerarlo, con un aviso más fuerte a
+    partir de +20% (zona ideal de cierre). Devuelve None si no aplica.
+    """
+    if roi_pct >= TAKE_PROFIT_MAX_PCT:
+        return (f"🎯 ROI en {roi_pct:+.2f}% — ya estás en la zona ideal de cierre "
+                f"({TAKE_PROFIT_MIN_PCT:.0f}-{TAKE_PROFIT_MAX_PCT:.0f}%+), fuerte candidato a tomar ganancias.")
+    if roi_pct >= TAKE_PROFIT_MIN_PCT:
+        return (f"💰 ROI en {roi_pct:+.2f}% — superó el {TAKE_PROFIT_MIN_PCT:.0f}%, "
+                f"empezá a evaluar si conviene cerrar la estrategia (\"/saylor_cerrar <precio>\").")
+    return None
 
 
 def calcular_promedio_inverso(posicion_usd_acumulado, posicion_btc_acumulado):
@@ -147,24 +175,28 @@ def estimar_liquidacion_inversa(promedio_inverso, posicion_btc_acumulado, margen
 
 def load_saylor_state():
     if os.path.exists(SAYLOR_STATE_FILE):
-        with open(SAYLOR_STATE_FILE, "r") as f:
-            return json.load(f)
-    # Estado vacío por defecto — hay que sembrarlo con los datos reales antes
-    # de usarlo (ver saylor_state.json / README).
-    return {
-        "start_date": None,
-        "balas_usadas": 0,
-        "posicion_usd_acumulado": 0.0,
-        "posicion_btc_acumulado": 0.0,
-        "margen_extra_btc_acumulado": 0.0,
-        "log": [],
-        "_previous_snapshot": None,
-    }
+        state = json.load(open(SAYLOR_STATE_FILE, "r"))
+    else:
+        state = {}
+    state.setdefault("capital_total", None)  # se fija con /saylor_iniciar <capital>
+    state.setdefault("start_date", None)
+    state.setdefault("balas_usadas", 0)
+    state.setdefault("posicion_usd_acumulado", 0.0)
+    state.setdefault("posicion_btc_acumulado", 0.0)
+    state.setdefault("margen_extra_btc_acumulado", 0.0)
+    state.setdefault("log", [])
+    state.setdefault("_previous_snapshot", None)
+    return state
 
 
 def save_saylor_state(state):
     with open(SAYLOR_STATE_FILE, "w") as f:
         json.dump(state, f, indent=2, ensure_ascii=False)
+
+
+def bala_size(state):
+    capital_total = state.get("capital_total") or CAPITAL_TOTAL_DEFAULT
+    return round(capital_total / MAX_BALAS, 2)
 
 
 def get_current_btc_price():
@@ -202,15 +234,16 @@ def format_daily_check_message(state, price):
     promedio_inverso = calcular_promedio_inverso(posicion_usd, posicion_btc)
     if promedio_inverso is None:
         return (
-            "⚠️ *Estrategia Saylor BTC* — todavía no tengo un promedio cargado. "
-            "Mandame la carga inicial, ej. \"Metí 2 balas a 77450\", para arrancar "
-            "el seguimiento."
+            "⚠️ *Estrategia Saylor BTC* — todavía no arrancaste. Mandame "
+            "\"/saylor_iniciar <capital_total>\" (ej. \"/saylor_iniciar 8000\") "
+            "para que te calcule la carga inicial."
         )
 
+    size = bala_size(state)
     roi = estimar_roi_btc(price, promedio_inverso)
     balas_posicion, balas_margen = balas_a_agregar(roi)
     total_balas_hoy = balas_posicion + balas_margen
-    balas_usd_hoy = round(total_balas_hoy * BALA_SIZE, 2)
+    balas_usd_hoy = round(total_balas_hoy * size, 2)
     btc_a_depositar_hoy = round(balas_usd_hoy / price, 8)
     balas_restantes = MAX_BALAS - balas_usadas - total_balas_hoy
 
@@ -218,14 +251,18 @@ def format_daily_check_message(state, price):
     if cerca_de_limite(roi):
         avisos.append("⚠️ El ROI está cerca de un límite de la tabla — confirmá el ROI real del exchange antes de recargar.")
     if balas_restantes < 0:
-        avisos.append(f"🛑 Esta recarga superaría el límite de {MAX_BALAS} balas / USD {CAPITAL_TOTAL:,.0f}. Revisá antes de ejecutar.")
+        capital_total = state.get("capital_total") or CAPITAL_TOTAL_DEFAULT
+        avisos.append(f"🛑 Esta recarga superaría el límite de {MAX_BALAS} balas / USD {capital_total:,.0f}. Revisá antes de ejecutar.")
     elif balas_restantes <= 3:
         avisos.append(f"⚠️ Quedan pocas balas ({balas_restantes}) para futuras recargas.")
+    nota = nota_cierre(roi)
+    if nota:
+        avisos.append(nota)
 
     dia_txt = f"Día {dia}" if dia is not None else "Día s/d"
     recarga_txt = f"+{balas_posicion} balas a la posición"
     if balas_margen:
-        margen_extra_btc = round(balas_margen * BALA_SIZE / price, 8)
+        margen_extra_btc = round(balas_margen * size / price, 8)
         recarga_txt += (f" y +{balas_margen} directo al margen (situación crítica — "
                          f"≈{margen_extra_btc:.8f} BTC extra, no suma exposición, solo colchón)")
 
@@ -273,6 +310,11 @@ def format_status_message(state, price=None):
     if price and promedio_inverso:
         roi = estimar_roi_btc(price, promedio_inverso)
         lines.append(f"ROI estimado ahora: {roi:+.2f}% (BTC a ${price:,.2f})")
+        nota = nota_cierre(roi)
+        if nota:
+            lines.append(nota)
+    if not promedio_inverso:
+        lines.append("\nTodavía no arrancaste — mandá \"/saylor_iniciar <capital_total>\" para empezar.")
     return "\n".join(lines)
 
 
@@ -318,16 +360,17 @@ def confirmar_recarga(state, balas_confirmadas, precio_confirmado, es_margen_ext
     """
     balas_previas = state.get("balas_usadas", 0)
     if balas_previas + balas_confirmadas > MAX_BALAS:
+        capital_total = state.get("capital_total") or CAPITAL_TOTAL_DEFAULT
         return {
             "ok": False,
             "motivo": (f"Esto llevaría el total a {balas_previas + balas_confirmadas} balas, "
-                       f"por encima del límite de {MAX_BALAS} (USD {CAPITAL_TOTAL:,.0f}). "
+                       f"por encima del límite de {MAX_BALAS} (USD {capital_total:,.0f}). "
                        f"No se guardó — revisá los números."),
         }
 
     state["_previous_snapshot"] = copy.deepcopy({k: v for k, v in state.items() if k != "_previous_snapshot"})
 
-    balas_usd = round(balas_confirmadas * BALA_SIZE, 2)
+    balas_usd = round(balas_confirmadas * bala_size(state), 2)
     btc_depositado = round(balas_usd / precio_confirmado, 8)
 
     if es_margen_extra:
@@ -396,6 +439,123 @@ def format_confirmacion_message(result):
     )
 
 
+def iniciar_estrategia(state, capital_total):
+    """
+    Arranca la estrategia desde cero: fija el capital total (define el
+    tamaño de bala = capital/30) y calcula cuánto entrar en la carga
+    inicial (regla de "Inicio" de la planilla: 2 balas, no 1 como el resto
+    de los días con ROI positivo). Rechaza si ya hay una posición abierta,
+    para no pisar datos reales por error — para eso hay que usar /deshacer
+    las veces que haga falta hasta volver a 0 balas, o pedir un reset a mano.
+    """
+    if state.get("balas_usadas", 0) > 0:
+        return {
+            "ok": False,
+            "motivo": (f"Ya hay una posición abierta ({state['balas_usadas']} balas usadas) — "
+                       f"no se puede reiniciar así para no pisar datos reales. Si de verdad "
+                       f"arrancás de cero, primero hay que resetear el archivo a mano."),
+        }
+    state["capital_total"] = capital_total
+    size = bala_size(state)
+    tamano_posicion = round(size * BALAS_INICIO * LEVERAGE, 2)
+    return {
+        "ok": True,
+        "capital_total": capital_total,
+        "bala_size": size,
+        "balas_inicio": BALAS_INICIO,
+        "tamano_posicion": tamano_posicion,
+    }
+
+
+def format_inicio_message(result):
+    if not result["ok"]:
+        return f"🛑 {result['motivo']}"
+    return (
+        f"🚀 *Estrategia MS iniciada*\n"
+        f"Capital total: USD {result['capital_total']:,.2f} en {MAX_BALAS} balas de "
+        f"USD {result['bala_size']:,.2f} c/u.\n"
+        f"Regla de Inicio: {result['balas_inicio']} balas de entrada.\n"
+        f"Abrí un long de BTC a {LEVERAGE}x por ≈USD {result['tamano_posicion']:,.2f} de "
+        f"tamaño de posición en tu exchange.\n\n"
+        f"Cuando lo hagas, mandame \"Metí {result['balas_inicio']} balas a PRECIO\" con el "
+        f"precio real al que entraste, y lo registro."
+    )
+
+
+def calcular_pnl_btc(posicion_usd_acumulado, promedio_inverso, precio_cierre):
+    """PnL en BTC de un long inverso: notional_usd * (1/entrada - 1/salida) — ver
+    docstring del módulo. No incluye funding/fees reales del exchange."""
+    if not promedio_inverso:
+        return None
+    return posicion_usd_acumulado * (1 / promedio_inverso - 1 / precio_cierre)
+
+
+def cerrar_estrategia(state, precio_cierre):
+    """
+    Cierra la posición: calcula el resultado final (ROI, PnL en BTC) al
+    precio dado, lo deja anotado en el log, y resetea los acumuladores para
+    poder arrancar de nuevo más adelante con /saylor_iniciar. El capital
+    total configurado se mantiene salvo que /saylor_iniciar lo cambie.
+    """
+    posicion_usd = state.get("posicion_usd_acumulado", 0.0)
+    posicion_btc = state.get("posicion_btc_acumulado", 0.0)
+    promedio_inverso = calcular_promedio_inverso(posicion_usd, posicion_btc)
+    if promedio_inverso is None:
+        return {"ok": False, "motivo": "No hay ninguna posición cargada todavía — no hay nada para cerrar."}
+
+    roi = estimar_roi_btc(precio_cierre, promedio_inverso)
+    pnl_btc = calcular_pnl_btc(posicion_usd, promedio_inverso, precio_cierre)
+    margen_total_btc = _margen_total_btc(state)
+    btc_final_estimado = round(margen_total_btc + pnl_btc, 8)
+    balas_usadas_anteriores = state.get("balas_usadas", 0)
+
+    state["_previous_snapshot"] = copy.deepcopy({k: v for k, v in state.items() if k != "_previous_snapshot"})
+    state.setdefault("log", []).append({
+        "fecha": datetime.now(timezone.utc).isoformat(),
+        "tipo": "cierre",
+        "precio_cierre": precio_cierre,
+        "promedio_inverso": promedio_inverso,
+        "roi_pct": roi,
+        "pnl_btc": round(pnl_btc, 8),
+        "btc_final_estimado": btc_final_estimado,
+    })
+
+    state["balas_usadas"] = 0
+    state["posicion_usd_acumulado"] = 0.0
+    state["posicion_btc_acumulado"] = 0.0
+    state["margen_extra_btc_acumulado"] = 0.0
+    state["start_date"] = None
+
+    return {
+        "ok": True,
+        "precio_cierre": precio_cierre,
+        "promedio_inverso": promedio_inverso,
+        "roi_pct": roi,
+        "pnl_btc": pnl_btc,
+        "margen_total_btc": margen_total_btc,
+        "btc_final_estimado": btc_final_estimado,
+        "balas_usadas_anteriores": balas_usadas_anteriores,
+    }
+
+
+def format_cierre_message(result):
+    if not result["ok"]:
+        return f"🛑 {result['motivo']}"
+    return (
+        f"🏁 *Estrategia MS cerrada*\n"
+        f"Precio de cierre: ${result['precio_cierre']:,.2f}\n"
+        f"Promedio de entrada (contrato inverso): ${result['promedio_inverso']:,.2f}\n"
+        f"ROI final (BTC, contrato inverso): {result['roi_pct']:+.2f}%\n"
+        f"PnL estimado: {result['pnl_btc']:+.8f} BTC\n"
+        f"Margen total antes del cierre: {result['margen_total_btc']:.8f} BTC\n"
+        f"BTC final estimado (margen + PnL): {result['btc_final_estimado']:.8f} BTC\n\n"
+        f"_Estimación aproximada — no incluye funding/fees reales del exchange, "
+        f"confirmá el resultado real ahí. Balas usadas antes de cerrar: "
+        f"{result['balas_usadas_anteriores']}. Para arrancar de nuevo: "
+        f"\"/saylor_iniciar <capital_total>\"._"
+    )
+
+
 def handle_message(text):
     """
     Punto de entrada llamado desde bot_btc_h4.py para todo lo que no sea un
@@ -404,6 +564,34 @@ def handle_message(text):
     """
     stripped = text.strip()
     lower = stripped.lower()
+
+    if lower.startswith("/saylor_iniciar"):
+        partes = stripped.split()
+        if len(partes) < 2:
+            return "Uso: /saylor_iniciar <capital_total_usd>\nEj: /saylor_iniciar 8000"
+        try:
+            capital = parse_price_ar(partes[1])
+        except ValueError:
+            return "No pude leer el capital — uso: /saylor_iniciar <capital_total_usd>"
+        state = load_saylor_state()
+        result = iniciar_estrategia(state, capital)
+        if result["ok"]:
+            save_saylor_state(state)
+        return format_inicio_message(result)
+
+    if lower.startswith("/saylor_cerrar"):
+        partes = stripped.split()
+        if len(partes) < 2:
+            return "Uso: /saylor_cerrar <precio_btc_actual>\nEj: /saylor_cerrar 92000"
+        try:
+            precio = parse_price_ar(partes[1])
+        except ValueError:
+            return "No pude leer el precio — uso: /saylor_cerrar <precio_btc_actual>"
+        state = load_saylor_state()
+        result = cerrar_estrategia(state, precio)
+        if result["ok"]:
+            save_saylor_state(state)
+        return format_cierre_message(result)
 
     if lower in ("/saylor", "/saylor_estado", "/posicion"):
         state = load_saylor_state()
