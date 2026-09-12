@@ -1,0 +1,31 @@
+# Manda un resumen semanal de la bitácora por Telegram (cantidad de señales,
+# winrate, resultado acumulado). Es de solo lectura: no modifica state.json ni
+# trades.json, así que no necesita el paso de git commit/push.
+
+name: Reporte semanal BTC
+
+on:
+  schedule:
+    - cron: "0 13 * * 1"  # lunes 13:00 UTC (~10am Argentina)
+  workflow_dispatch: {}   # permite correrlo manualmente desde la pestaña Actions
+
+jobs:
+  weekly-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Mandar reporte semanal
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python bot_btc_h4.py --weekly-report
