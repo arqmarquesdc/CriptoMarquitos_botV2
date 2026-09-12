@@ -1,3 +1,4 @@
+
 """
 Bot de seguimiento de la estrategia "Michael Saylor" BTC (long apalancado de
 largo plazo, con recargas diarias en base al ROI % no realizado).
@@ -439,14 +440,15 @@ def format_confirmacion_message(result):
     )
 
 
-def iniciar_estrategia(state, capital_total):
+def iniciar_estrategia(state, capital_total, precio_actual=None):
     """
     Arranca la estrategia desde cero: fija el capital total (define el
     tamaño de bala = capital/30) y calcula cuánto entrar en la carga
     inicial (regla de "Inicio" de la planilla: 2 balas, no 1 como el resto
-    de los días con ROI positivo). Rechaza si ya hay una posición abierta,
-    para no pisar datos reales por error — para eso hay que usar /deshacer
-    las veces que haga falta hasta volver a 0 balas, o pedir un reset a mano.
+    de los días con ROI positivo). El margen a depositar es en USD (fijo,
+    valor nominal de las balas) y también se muestra su equivalente en BTC
+    al precio actual, ya que la idea es comprar BTC con BTC. Rechaza si ya
+    hay una posición abierta, para no pisar datos reales por error.
     """
     if state.get("balas_usadas", 0) > 0:
         return {
@@ -457,29 +459,44 @@ def iniciar_estrategia(state, capital_total):
         }
     state["capital_total"] = capital_total
     size = bala_size(state)
-    tamano_posicion = round(size * BALAS_INICIO * LEVERAGE, 2)
+    margen_usd = round(size * BALAS_INICIO, 2)
+    tamano_posicion_usd = round(margen_usd * LEVERAGE, 2)
+    margen_btc = round(margen_usd / precio_actual, 8) if precio_actual else None
     return {
         "ok": True,
         "capital_total": capital_total,
         "bala_size": size,
         "balas_inicio": BALAS_INICIO,
-        "tamano_posicion": tamano_posicion,
+        "margen_usd": margen_usd,
+        "tamano_posicion_usd": tamano_posicion_usd,
+        "precio_actual": precio_actual,
+        "margen_btc": margen_btc,
     }
 
 
 def format_inicio_message(result):
     if not result["ok"]:
         return f"🛑 {result['motivo']}"
-    return (
-        f"🚀 *Estrategia MS iniciada*\n"
+    lines = [
+        "🚀 *Estrategia MS iniciada*",
         f"Capital total: USD {result['capital_total']:,.2f} en {MAX_BALAS} balas de "
-        f"USD {result['bala_size']:,.2f} c/u.\n"
-        f"Regla de Inicio: {result['balas_inicio']} balas de entrada.\n"
-        f"Abrí un long de BTC a {LEVERAGE}x por ≈USD {result['tamano_posicion']:,.2f} de "
-        f"tamaño de posición en tu exchange.\n\n"
-        f"Cuando lo hagas, mandame \"Metí {result['balas_inicio']} balas a PRECIO\" con el "
-        f"precio real al que entraste, y lo registro."
+        f"USD {result['bala_size']:,.2f} c/u.",
+        f"Regla de Inicio: {result['balas_inicio']} balas de entrada.",
+    ]
+    if result.get("precio_actual"):
+        lines.append(f"Precio BTC/USD actual: ${result['precio_actual']:,.2f} (Kraken)")
+    margen_txt = f"Margen a depositar: USD {result['margen_usd']:,.2f}"
+    if result.get("margen_btc"):
+        margen_txt += f" ≈ {result['margen_btc']:.8f} BTC al precio actual"
+    lines.append(margen_txt + ".")
+    lines.append(f"Tamaño de posición resultante ({LEVERAGE}x en el exchange): USD {result['tamano_posicion_usd']:,.2f}.")
+    lines.append(
+        f"\nCuando compres el BTC y abras la posición, mandame \"Metí "
+        f"{result['balas_inicio']} balas a PRECIO\" con el precio real al que "
+        f"entraste, y lo registro (el BTC de arriba es solo una referencia al "
+        f"precio de AHORA — el monto real se fija con el precio de tu operación)."
     )
+    return "\n".join(lines)
 
 
 def calcular_pnl_btc(posicion_usd_acumulado, promedio_inverso, precio_cierre):
@@ -574,7 +591,11 @@ def handle_message(text):
         except ValueError:
             return "No pude leer el capital — uso: /saylor_iniciar <capital_total_usd>"
         state = load_saylor_state()
-        result = iniciar_estrategia(state, capital)
+        try:
+            precio_actual = get_current_btc_price()
+        except Exception:
+            precio_actual = None
+        result = iniciar_estrategia(state, capital, precio_actual)
         if result["ok"]:
             save_saylor_state(state)
         return format_inicio_message(result)
