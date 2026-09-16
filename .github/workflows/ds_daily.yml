@@ -4,15 +4,17 @@
 # Telegram para hacerlo a mano con "/ds_chequeo <precio>".
 #
 # Esto SÍ puede cambiar ds_state.json (guarda si la alerta ya está activa,
-# para no repetirla en cada corrida), por eso tiene paso de git commit/push,
-# a diferencia de saylor_daily.yml y reporte_semanal.yml que son de solo
-# lectura.
+# para no repetirla en cada corrida), por eso tiene paso de git commit/push.
+#
+# El "schedule" de acá es solo un respaldo — igual que en saylor_daily.yml,
+# el disparo confiable a las 8:00 Argentina es un cronjob externo en
+# cron-job.org contra la API (workflow_dispatch).
 
 name: Chequeo diario DS (Doble Saylor)
 
 on:
   schedule:
-    - cron: "0 13 * * *"  # 13:00 UTC = 10:00 America/Buenos_Aires
+    - cron: "0 11 * * *"  # 11:00 UTC = 08:00 America/Buenos_Aires (respaldo, no confiable solo)
   workflow_dispatch: {}
 
 permissions:
