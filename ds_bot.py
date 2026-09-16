@@ -210,6 +210,18 @@ def format_status_message(state, precio_actual=None):
     return "\n".join(lines)
 
 
+def format_daily_check_message(state, precio_actual):
+    """Versión corta para el recordatorio diario (a diferencia de
+    format_status_message, que es la respuesta completa a "/ds")."""
+    precio_prom = precio_entrada_ponderado(state)
+    rendimiento = estimar_rendimiento_ds(precio_actual, precio_prom)
+    balas_usadas = state.get("balas_usadas", 0)
+    linea = f"📊 DS: ${precio_actual:,.2f} | rendimiento {rendimiento:+.1f}% | {balas_usadas}/{MAX_BALAS} balas"
+    if balas_usadas < MAX_BALAS:
+        linea += " — falta cargar la próxima"
+    return linea
+
+
 def format_alerta_rendimiento(state, precio_actual, rendimiento):
     precio_prom = precio_entrada_ponderado(state)
     return (
@@ -250,6 +262,10 @@ def check_rendimiento_alert(state, precio_actual):
 
 
 def run_daily_check():
+    """Manda SIEMPRE un recordatorio diario con el estado (igual que MS),
+    y además el aviso de -40%/recuperación si corresponde — antes esta
+    función se quedaba muda salvo que cruzara el umbral, lo que hacía
+    parecer que el chequeo diario "no funcionaba"."""
     # import local para evitar import circular (bot_btc_h4 importa ds_bot)
     from bot_btc_h4 import send_telegram_message, build_confirm_ds_keyboard
 
@@ -268,15 +284,18 @@ def run_daily_check():
 
     aviso = check_rendimiento_alert(state, precio)
     save_ds_state(state)
+
+    balas_usadas = state.get("balas_usadas", 0)
+    texto = format_daily_check_message(state, precio)
+    keyboard = None
     if aviso:
-        keyboard = None
-        balas_usadas = state.get("balas_usadas", 0)
+        texto += f"\n\n{aviso}"
         # El botón "Ya la sumé" solo tiene sentido en el aviso de cruce hacia
         # abajo (🔴, corresponde considerar la próxima bala), no en el de
         # recuperación (🟢) ni si ya no queda ninguna bala por cargar.
         if aviso.startswith("🔴") and balas_usadas < MAX_BALAS:
             keyboard = build_confirm_ds_keyboard(balas_usadas + 1)
-        send_telegram_message(aviso, reply_markup=keyboard)
+    send_telegram_message(texto, reply_markup=keyboard)
 
 
 def format_registro_message(result):
