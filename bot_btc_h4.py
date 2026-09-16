@@ -943,6 +943,7 @@ def build_help_message():
         "/saylor → tu estado: BTC acumulado, promedio, margen, liquidación.\n"
         "/chequeo → precio y ROI ahora, y si conviene recargar.\n"
         "/saylor_cerrar <precio> → cierra la posición y calcula el resultado.\n"
+        "/saylor_promedio <precio> → ajusta el promedio real (por fees/slippage), sin tocar las balas usadas.\n"
         "/deshacer → revierte la última carga.\n\n"
         "📊 *Estrategia DS*\n"
         "/ds → tu estado: balas, entrada, margen real, rendimiento.\n"
