@@ -180,7 +180,7 @@ def format_status_message(state, precio_actual=None):
     balas_usadas = state.get("balas_usadas", 0)
     size = bala_size(state)
     lines = [
-        "📊 *Estado — DS (Cargador 1, MSTR, Bitget)*",
+        "📊 Estado — DS (Cargador 1, MSTR, Bitget)",
         f"Capital: USD {state.get('capital_total', CAPITAL_TOTAL_DEFAULT):,.2f} en {MAX_BALAS} balas de USD {size:,.2f}",
         f"Balas usadas: {balas_usadas}/{MAX_BALAS}",
     ]
@@ -225,7 +225,7 @@ def format_daily_check_message(state, precio_actual):
 def format_alerta_rendimiento(state, precio_actual, rendimiento):
     precio_prom = precio_entrada_ponderado(state)
     return (
-        f"🔴 *Alerta DS — rendimiento en {rendimiento:+.1f}%*\n"
+        f"🔴 Alerta DS — rendimiento en {rendimiento:+.1f}%\n"
         f"Precio actual: ${precio_actual:,.2f} (entrada prom.: ${precio_prom:,.2f})\n"
         f"Cruzó el umbral de {ALERTA_RENDIMIENTO_PCT:.0f}% que definiste. "
         f"Todavía no hay una regla automática para la bala 2 — es tu turno de decidir si conviene recargar ahora."
