@@ -745,7 +745,7 @@ def format_bias_entry_message(direction, info, bias_label, horizon_desc):
     gestion_linea = _format_risk_rule_section(info, riesgo_pct)
 
     return (
-        f"{emoji} *Señal de {accion} - BTC/USD ({bias_label}, confirmada en M15)*\n"
+        f"{emoji} Señal de {accion} - BTC/USD ({bias_label}, confirmada en M15)\n"
         f"Disparador: {trigger_label}\n"
         f"Sesgo detectado en {bias_label}: {ts_bias}\n"
         f"Confirmado en M15: {ts_m15}\n"
@@ -759,12 +759,12 @@ def format_bias_entry_message(direction, info, bias_label, horizon_desc):
         f"⚖️ Ratio riesgo:beneficio real: 1:{info.get('actual_risk_reward', '?')}\n"
         f"📊 Apalancamiento sugerido: hasta {info['leverage']}x\n"
         f"{gestion_linea}\n"
-        f"_Trade de plazo {horizon_desc}: la dirección y los niveles vienen de la estructura en "
+        f"Trade de plazo {horizon_desc}: la dirección y los niveles vienen de la estructura en "
         f"{bias_label}, M15 solo afina el momento de entrada. El apalancamiento amplifica tanto "
         f"ganancias como pérdidas y acerca el precio de liquidación — el valor sugerido "
         f"deja margen respecto de la distancia al stop loss, pero no elimina el riesgo de "
         f"liquidación (funding, mecha de precio, o slippage pueden variarlo). Usalo solo si "
-        f"entendés cómo funciona el margen en tu exchange. No es consejo financiero._"
+        f"entendés cómo funciona el margen en tu exchange. No es consejo financiero."
     )
 
 
@@ -860,7 +860,7 @@ def format_regime_message(direction, info, horizon_label, ema_fast_period, ema_s
     gestion_linea = _format_risk_rule_section(info, riesgo_pct)
 
     return (
-        f"{emoji} *CAMBIO DE TENDENCIA — BTC/USD ({horizon_label})*\n"
+        f"{emoji} CAMBIO DE TENDENCIA — BTC/USD ({horizon_label})\n"
         f"{titulo}\n\n"
         f"Precio: ${info['price']:,.2f}\n"
         f"EMA{ema_fast_period}: ${info['ema_fast']:,.2f} | EMA{ema_slow_period}: ${info['ema_slow']:,.2f}\n"
@@ -870,7 +870,7 @@ def format_regime_message(direction, info, horizon_label, ema_fast_period, ema_s
         f"🎯 Objetivo (1:{info['risk_reward']:.0f}): ${info['take_profit']:,.2f}\n"
         f"{gestion_linea}\n"
         f"Vela cerrada: {ts}\n\n"
-        f"_{note} No es consejo financiero._"
+        f"{note} No es consejo financiero."
     )
 
 
@@ -921,7 +921,12 @@ def send_telegram_message(text, reply_markup=None):
         print(text)
         return None
     url = TELEGRAM_API_URL.format(token=token)
-    payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
+    # Sin parse_mode (texto plano): con Markdown, Telegram trata "_" y "*"
+    # como marcadores de cursiva/negrita y los "come" del texto cuando hay
+    # varios en el mismo mensaje (ej. nombres de comando como
+    # "/saylor_promedio") — pasó de verdad y rompió el menú. Más vale texto
+    # plano sin sorpresas que negrita con riesgo de comerse guiones bajos.
+    payload = {"chat_id": chat_id, "text": text}
     if reply_markup:
         payload["reply_markup"] = json.dumps(reply_markup)
     resp = requests.post(url, json=payload, timeout=15)
@@ -937,15 +942,15 @@ def build_help_message():
     # = False) — Marcos pidió (12/09) recibir solo MS y DS, así que el menú no
     # la menciona. /estado sigue andando por si hace falta diagnosticar el bot.
     return (
-        "👋 *¿Qué puedo hacer?*\n\n"
-        "₿ *Estrategia MS*\n"
+        "👋 ¿Qué puedo hacer?\n\n"
+        "₿ Estrategia MS\n"
         "/saylor_iniciar <capital> → arranca de cero, calcula bala y carga inicial.\n"
         "/saylor → tu estado: BTC acumulado, promedio, margen, liquidación.\n"
         "/chequeo → precio y ROI ahora, y si conviene recargar.\n"
         "/saylor_cerrar <precio> → cierra la posición y calcula el resultado.\n"
         "/saylor_promedio <precio> → ajusta el promedio real (por fees/slippage), sin tocar las balas usadas.\n"
         "/deshacer → revierte la última carga.\n\n"
-        "📊 *Estrategia DS*\n"
+        "📊 Estrategia DS\n"
         "/ds → tu estado: balas, entrada, margen real, rendimiento.\n"
         "/ds_chequeo → rendimiento ahora (con precio a mano o automático).\n"
         "/ds_deshacer → revierte la última bala.\n"
@@ -1091,7 +1096,7 @@ def build_health_status_message(state, trades):
             pending_lines.append(f"{bias_label}: {p['direction']} esperando confirmación en M15")
 
     lines = [
-        "⚠️ *El bot está en línea, pero con problemas:*" if problems else "✅ *El bot está en línea y corriendo normal.*",
+        "⚠️ El bot está en línea, pero con problemas:" if problems else "✅ El bot está en línea y corriendo normal.",
         f"Última corrida: {last_run_txt}",
         f"Trades abiertos en la bitácora: {len(open_trades)}",
         "Ideas pendientes: " + (" | ".join(pending_lines) if pending_lines else "ninguna ahora mismo"),
@@ -1264,7 +1269,7 @@ def record_check_result(state, label, error=None):
 
     if error is None:
         if status["alerted"]:
-            send_telegram_message(f"✅ *{label}* se recuperó, ya está funcionando de nuevo.")
+            send_telegram_message(f"✅ {label} se recuperó, ya está funcionando de nuevo.")
         status["consecutive_failures"] = 0
         status["last_error"] = None
         status["alerted"] = False
@@ -1273,7 +1278,7 @@ def record_check_result(state, label, error=None):
         status["last_error"] = str(error)
         if status["consecutive_failures"] >= ERROR_ALERT_THRESHOLD and not status["alerted"]:
             send_telegram_message(
-                f"⚠️ *{label}* falló {status['consecutive_failures']} veces seguidas.\n"
+                f"⚠️ {label} falló {status['consecutive_failures']} veces seguidas.\n"
                 f"Último error: {error}\n\nRevisá el log en GitHub Actions."
             )
             status["alerted"] = True
@@ -1630,7 +1635,7 @@ def format_weekly_report(trades, now_ms):
     overall = compute_bitacora_stats(trades, layer_filter="trading")
 
     lines = [
-        "📊 *Reporte semanal — bot BTC (capa de trading H4/H1)*",
+        "📊 Reporte semanal — bot BTC (capa de trading H4/H1)",
         "",
         f"Últimos 7 días: {_format_bitacora_stats_line(week)}",
         f"Histórico completo: {_format_bitacora_stats_line(overall)}",
@@ -1644,7 +1649,7 @@ def format_weekly_report(trades, now_ms):
             f"pensar en plata real."
         )
 
-    lines.append("\n_Reporte automático generado desde la bitácora. No es consejo financiero._")
+    lines.append("\nReporte automático generado desde la bitácora. No es consejo financiero.")
     return "\n".join(lines)
 
 
@@ -1663,7 +1668,7 @@ def test_telegram():
     para verificar que el token/chat_id están bien configurados."""
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     send_telegram_message(
-        f"✅ *Test de conexión* — el bot de alertas BTC (H4/H1/M15) está andando bien.\n"
+        f"✅ Test de conexión — el bot de alertas BTC (H4/H1/M15) está andando bien.\n"
         f"Hora: {ts}"
     )
 
