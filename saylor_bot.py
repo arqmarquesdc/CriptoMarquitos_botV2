@@ -292,7 +292,7 @@ def format_daily_check_message(state, price):
     if balas_margen:
         margen_extra_btc = round(balas_margen * size / price, 8)
         recarga_txt += (f" y +{balas_margen} directo al margen (situación crítica — "
-                         f"≈{margen_extra_btc:.8f} BTC extra, no suma exposición, solo colchón)")
+                         f"≈{margen_extra_btc:.4f} BTC extra, no suma exposición, solo colchón)")
 
     lines = [
         f"📅 *Estrategia Saylor BTC — {dia_txt}*",
@@ -300,7 +300,7 @@ def format_daily_check_message(state, price):
         f"Promedio: ${promedio_inverso:,.2f}",
         f"ROI estimado: {roi:+.2f}%",
         f"Recarga sugerida: {recarga_txt}",
-        f"Equivale a: {balas_usd_hoy:,.2f} USD → ≈{btc_a_depositar_hoy:.8f} BTC de margen",
+        f"Equivale a: {balas_usd_hoy:,.2f} USD → ≈{btc_a_depositar_hoy:.4f} BTC de margen",
         f"Balas usadas: {balas_usadas} → quedarían {balas_restantes} de {MAX_BALAS}",
     ]
     if avisos:
@@ -314,10 +314,10 @@ def _format_log_line(entry):
     tipo = entry.get("tipo")
     if tipo == "cierre":
         return (f"— {eid} (cierre): precio ${entry['precio_cierre']:,.2f}, "
-                f"ROI {entry['roi_pct']:+.2f}%, PnL {entry['pnl_btc']:+.8f} BTC")
+                f"ROI {entry['roi_pct']:+.2f}%, PnL {entry['pnl_btc']:+.4f} BTC")
     etiqueta = "margen extra" if tipo == "margen_extra" else "posición"
     return (f"— {eid} ({etiqueta}): {entry['balas_confirmadas']} balas a "
-            f"${entry['precio_confirmado']:,.2f} → {entry['btc_depositado']:.8f} BTC")
+            f"${entry['precio_confirmado']:,.2f} → {entry['btc_depositado']:.4f} BTC")
 
 
 def format_status_message(state, price=None):
@@ -336,8 +336,8 @@ def format_status_message(state, price=None):
         f"Día: {dia if dia is not None else 's/d'}",
         f"Promedio: {'$' + format(promedio_inverso, ',.2f') if promedio_inverso else 's/d'}",
         f"Balas usadas: {balas_usadas}/{MAX_BALAS} (restantes: {MAX_BALAS - balas_usadas})",
-        f"Margen BTC — posición: {posicion_btc:.8f} BTC" + (f" | extra: {margen_extra_btc:.8f} BTC" if margen_extra_btc else ""),
-        f"Margen BTC total: {margen_total_btc:.8f} BTC",
+        f"Margen BTC — posición: {posicion_btc:.4f} BTC" + (f" | extra: {margen_extra_btc:.4f} BTC" if margen_extra_btc else ""),
+        f"Margen BTC total: {margen_total_btc:.4f} BTC",
         f"Liquidación estimada: {'$' + format(liquidacion, ',.2f') if liquidacion else 's/d'}",
     ]
     if price:
@@ -485,8 +485,8 @@ def format_confirmacion_message(result):
     if result["tipo"] == "margen_extra":
         return (
             f"✅ {result['id']} registrada como margen extra (colchón, no suma exposición).\n"
-            f"BTC depositado ahora: {result['btc_depositado']:.8f} BTC\n"
-            f"Margen BTC total (posición + extra): {result['margen_total_btc']:.8f} BTC\n"
+            f"BTC depositado ahora: {result['btc_depositado']:.4f} BTC\n"
+            f"Margen BTC total (posición + extra): {result['margen_total_btc']:.4f} BTC\n"
             f"Balas usadas: {result['balas_usadas']}/{MAX_BALAS} (restantes: {result['balas_restantes']})\n\n"
             f"_Si algo no cierra, mandá \"/deshacer\" para revertir esta última carga._"
         )
@@ -494,9 +494,9 @@ def format_confirmacion_message(result):
     promedio_txt = f"${result['promedio_inverso']:,.2f}" if result["promedio_inverso"] else "s/d"
     return (
         f"✅ {result['id']} registrada.\n"
-        f"BTC depositado ahora: {result['btc_depositado']:.8f} BTC\n"
+        f"BTC depositado ahora: {result['btc_depositado']:.4f} BTC\n"
         f"Nuevo promedio: {promedio_txt}\n"
-        f"Margen BTC total: {result['margen_total_btc']:.8f} BTC\n"
+        f"Margen BTC total: {result['margen_total_btc']:.4f} BTC\n"
         f"Balas usadas: {result['balas_usadas']}/{MAX_BALAS} (restantes: {result['balas_restantes']})\n\n"
         f"_Si algo no cierra, mandá \"/deshacer\" para revertir esta última carga._"
     )
@@ -548,7 +548,7 @@ def format_inicio_message(result):
         lines.append(f"Precio BTC/USD actual: ${result['precio_actual']:,.2f} (Kraken, {_hora_actual_ar()})")
     margen_txt = f"Margen a depositar: USD {result['margen_usd']:,.2f}"
     if result.get("margen_btc"):
-        margen_txt += f" ≈ {result['margen_btc']:.8f} BTC al precio actual"
+        margen_txt += f" ≈ {result['margen_btc']:.4f} BTC al precio actual"
     lines.append(margen_txt + ".")
     lines.append(f"Tamaño de posición resultante ({LEVERAGE}x en el exchange): USD {result['tamano_posicion_usd']:,.2f}.")
     lines.append(
@@ -625,9 +625,9 @@ def format_cierre_message(result):
         f"Precio de cierre: ${result['precio_cierre']:,.2f}\n"
         f"Promedio de entrada: ${result['promedio_inverso']:,.2f}\n"
         f"ROI final: {result['roi_pct']:+.2f}%\n"
-        f"PnL estimado: {result['pnl_btc']:+.8f} BTC\n"
-        f"Margen total antes del cierre: {result['margen_total_btc']:.8f} BTC\n"
-        f"BTC final estimado: {result['btc_final_estimado']:.8f} BTC\n\n"
+        f"PnL estimado: {result['pnl_btc']:+.4f} BTC\n"
+        f"Margen total antes del cierre: {result['margen_total_btc']:.4f} BTC\n"
+        f"BTC final estimado: {result['btc_final_estimado']:.4f} BTC\n\n"
         f"_Confirmá el resultado real en el exchange. Para arrancar de nuevo: "
         f"\"/saylor_iniciar <capital_total>\"._"
     )
