@@ -1128,13 +1128,21 @@ def route_command_text(state, trades, text):
         # Todo lo que no es un comando de la capa de trading se prueba
         # contra la estrategia Saylor (comandos propios o confirmación de
         # recarga por texto libre). handle_message devuelve None si el
-        # texto no le corresponde, y ahí no se manda nada.
+        # texto no le corresponde.
         try:
             reply = saylor_bot.handle_message(text)
-            if reply:
-                send_telegram_message(reply)
         except Exception as e:
+            reply = None
             print(f"[ERROR] [saylor_bot] {e}")
+        if reply:
+            send_telegram_message(reply)
+        elif text.startswith("/"):
+            # Comando con "/" que nadie reconoció (típico: falta un guion
+            # bajo, ej. "/saylorpromedio" en vez de "/saylor_promedio") —
+            # antes esto se quedaba mudo, sin avisar que el comando no existe.
+            send_telegram_message(
+                "🤔 No reconozco ese comando. Escribí \"hola\" para ver el menú completo."
+            )
 
 
 def process_telegram_updates(state, trades):
