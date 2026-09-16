@@ -1,15 +1,21 @@
 # Manda el chequeo diario de la estrategia Saylor BTC por Telegram (precio,
 # ROI estimado, recarga sugerida). Es de solo lectura sobre saylor_state.json
 # — no cambia nada, por eso no necesita un paso de git commit/push. El estado
-# solo cambia cuando Marcos confirma una recarga real por texto (eso lo
-# procesa el cron de 15 minutos de alertas_btc.yml, no este workflow).
+# solo cambia cuando Marcos confirma una recarga real (eso lo procesa el cron
+# de alertas_btc.yml).
+#
+# El "schedule" de acá es solo un respaldo — GitHub puede demorar horas en
+# disparar su cron nativo (visto en la práctica: corridas 3-5h tarde). El
+# disparo confiable a las 8:00 Argentina es un cronjob externo en
+# cron-job.org que pega directo a la API (workflow_dispatch), igual que se
+# armó para alertas_btc.yml.
 
 name: Chequeo diario Saylor BTC
 
 on:
   schedule:
-    - cron: "0 12 * * *"  # 12:00 UTC = 09:00 America/Buenos_Aires (UTC-3 fijo, sin horario de verano)
-  workflow_dispatch: {}   # permite correrlo manualmente desde la pestaña Actions
+    - cron: "0 11 * * *"  # 11:00 UTC = 08:00 America/Buenos_Aires (respaldo, no confiable solo)
+  workflow_dispatch: {}   # permite correrlo manualmente, y es lo que dispara cron-job.org
 
 jobs:
   daily-check:
