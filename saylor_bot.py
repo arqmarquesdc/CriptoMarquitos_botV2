@@ -40,24 +40,30 @@ USDT. Esto cambia dos cosas de fondo respecto a un contrato lineal (USD-M):
    Ese cociente ($/BTC) ya ES el promedio armónico correcto — no hace falta
    calcularlo aparte.
 
-=== Caso "situación crítica" (ROI <= -40%) ===
-La tabla pide "+3 balas a la posición y +3 balas directo al margen". Las
-balas "directo al margen" son colchón extra: SUMAN BTC depositado (y cuentan
-para el límite de 30 balas/USD 8.000) pero NO suman notional/exposición, así
-que no entran en el cálculo de promedio_inverso ni de PnL — sí achican la
-distancia a liquidación, porque hay más margen total respaldando la misma
-exposición. Por eso se trackean aparte (`margen_extra_btc_acumulado`).
+=== Casos "Crítica" (ROI <= -40%) y "Terminal" (ROI <= -60%) ===
+La tabla pide balas "directo al margen" además de las de posición (3+3 en
+Crítica, 6+6 en Terminal). Esas balas de margen son colchón extra: SUMAN BTC
+depositado (y cuentan para el límite de 30 balas) pero NO suman
+notional/exposición, así que no entran en el cálculo de promedio_inverso ni
+de PnL — sí achican la distancia a liquidación, porque hay más margen total
+respaldando la misma exposición. Por eso se trackean aparte
+(`margen_extra_btc_acumulado`).
+
+=== Cargadores (reglas CriptoNorber) ===
+El capital que se carga con "/saylor_iniciar <capital_total>" es el
+"Cargador 1": 30 balas, tamaño de bala = capital/30 (sin cambios en la
+fórmula). Un "Cargador 2" — para ir ante una corrección o caída prolongada —
+es por ahora solo un concepto, no algo que el bot maneje todavía; cuando
+llegue el momento se decide y se implementa aparte.
 
 === Arrancar y cerrar la estrategia ===
-El capital total NO está fijo en el código — se define con
-"/saylor_iniciar <capital_total>", que calcula el tamaño de bala
-(capital/30) y la carga inicial (regla de "Inicio": 2 balas, no 1 como el
-resto de los días en ROI positivo). Rechaza si ya hay una posición abierta,
-para no pisar datos reales.
+"/saylor_iniciar <capital_total>" calcula el tamaño de bala (capital/30) y
+la carga inicial (regla de "Inicio": 3 balas). Rechaza si ya hay una
+posición abierta, para no pisar datos reales.
 
 "/saylor_cerrar <precio>" liquida la posición al precio dado: calcula
 ROI/PnL final, lo deja anotado en el log, y resetea los acumuladores para
-poder volver a arrancar más adelante. A partir de ROI +10% el bot ya
+poder volver a arrancar más adelante. A partir de ROI +15% el bot ya
 empieza a sugerir evaluar el cierre (más fuerte desde +20%).
 
 Uso:
@@ -79,12 +85,14 @@ import requests
 from price_utils import parse_price_ar
 
 CAPITAL_TOTAL_DEFAULT = 8000.0  # fallback si por algún motivo state no tiene capital_total todavía
-MAX_BALAS = 30
-BALAS_INICIO = 2  # regla de "Inicio" de la planilla: la primera carga es 2 balas, no 1
+MAX_BALAS = 30  # balas del Cargador 1 (reglas CriptoNorber) — el capital que se carga con
+                 # /saylor_iniciar es el Cargador 1; un Cargador 2 queda como concepto para
+                 # más adelante (ante una corrección o caída prolongada), sin programar todavía.
+BALAS_INICIO = 3  # regla de "Inicio" (reglas CriptoNorber, actualizado 15/09): la primera carga es 3 balas
 LEVERAGE = 5
-TAKE_PROFIT_MIN_PCT = 10  # desde acá, sugerir evaluar el cierre de la estrategia
+TAKE_PROFIT_MIN_PCT = 15  # desde acá, sugerir evaluar el cierre de la estrategia (reglas CriptoNorber)
 TAKE_PROFIT_MAX_PCT = 20  # zona ideal de cierre (recomendación más fuerte)
-LIMITES_TABLA = [0, -5, -10, -20, -40]  # umbrales de la tabla de recarga, para el aviso "cerca de un límite"
+LIMITES_TABLA = [5, 0, -5, -10, -15, -40, -60]  # umbrales de la tabla, para el aviso "cerca de un límite"
 CERCA_LIMITE_PCT = 1.0  # a menos de 1 punto porcentual de un límite, sugerir confirmar el ROI real
 
 SAYLOR_STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "saylor_state.json")
@@ -98,27 +106,29 @@ def _hora_actual_ar():
 
 def balas_a_agregar(roi_pct):
     """
-    Tabla de recarga diaria según ROI % no realizado estimado (ahora en
-    términos de BTC, contrato inverso — ver docstring del módulo). Devuelve
+    Tabla de recarga diaria según ROI % no realizado estimado. Devuelve
     (balas_a_la_posicion, balas_directo_al_margen) — el segundo valor solo es
-    distinto de 0 en el caso crítico (ROI <= -40%).
+    distinto de 0 en los casos Crítica/Terminal.
 
-    Escalones (confirmados con la planilla "Michael Saylor.xlsx" de Marcos):
-    Positivo: 1 | hasta -5%: 2 | hasta -10%: 3 | de -10% a -20%: 4 |
-    desde -20%: 5 | crítica desde -40%: 3 a la posición + 3 a margen.
-    El tramo de -15% a -20% se extiende con el mismo valor que -10%/-15%
-    (4 balas) — la planilla no marca un escalón propio ahí, el próximo
-    escalón real es -20%, no -15%.
+    Reglas oficiales CriptoNorber (reemplazadas 15/09, ver infografía —
+    antes se usaba una tabla basada en la planilla personal de Marcos):
+    Más de +5%: 1 | entre 0% y ±5%: 2 | entre -5% y -10%: 3 |
+    entre -10% y -15%: 4 | menos de -15% (hasta -40%): 5 |
+    Crítica (-40% o peor): 3 a la posición + 3 a margen |
+    Terminal (-60% o peor): 6 a la posición + 6 a margen.
+    "Inicio" (primera carga) no pasa por acá — es BALAS_INICIO, siempre 3.
     """
+    if roi_pct <= -60:
+        return 6, 6
     if roi_pct <= -40:
         return 3, 3
-    if roi_pct <= -20:
+    if roi_pct < -15:
         return 5, 0
     if roi_pct < -10:
         return 4, 0
     if roi_pct < -5:
         return 3, 0
-    if roi_pct < 0:
+    if roi_pct <= 5:
         return 2, 0
     return 1, 0
 
@@ -287,21 +297,15 @@ def format_daily_check_message(state, price):
     lines = [
         f"📅 *Estrategia Saylor BTC — {dia_txt}*",
         f"Precio BTC/USD actual: ${price:,.2f} (Kraken, {_hora_actual_ar()})",
-        f"Promedio (contrato inverso): ${promedio_inverso:,.2f}",
-        f"ROI estimado (BTC, contrato inverso): {roi:+.2f}%",
+        f"Promedio: ${promedio_inverso:,.2f}",
+        f"ROI estimado: {roi:+.2f}%",
         f"Recarga sugerida: {recarga_txt}",
-        f"Equivale a: {balas_usd_hoy:,.2f} USD nominal → ≈{btc_a_depositar_hoy:.8f} BTC a depositar como margen al precio actual",
+        f"Equivale a: {balas_usd_hoy:,.2f} USD → ≈{btc_a_depositar_hoy:.8f} BTC de margen",
         f"Balas usadas: {balas_usadas} → quedarían {balas_restantes} de {MAX_BALAS}",
     ]
     if avisos:
         lines.append("")
         lines.extend(avisos)
-    lines.append(
-        "\n_El BTC a depositar es una referencia al precio de AHORA — el monto real se "
-        "fija cuando confirmes (\"Metí X balas a PRECIO\") con el precio real de tu "
-        "operación. Cargá el margen como TAMAÑO DE POSICIÓN a abrir, el exchange ya "
-        "multiplica x5. No es consejo financiero._"
-    )
     return "\n".join(lines)
 
 
@@ -330,11 +334,11 @@ def format_status_message(state, price=None):
     lines = [
         "📊 *Estado — Estrategia Saylor BTC*",
         f"Día: {dia if dia is not None else 's/d'}",
-        f"Promedio (contrato inverso): {'$' + format(promedio_inverso, ',.2f') if promedio_inverso else 's/d'}",
+        f"Promedio: {'$' + format(promedio_inverso, ',.2f') if promedio_inverso else 's/d'}",
         f"Balas usadas: {balas_usadas}/{MAX_BALAS} (restantes: {MAX_BALAS - balas_usadas})",
-        f"Margen BTC depositado — posición: {posicion_btc:.8f} BTC" + (f" | extra (colchón): {margen_extra_btc:.8f} BTC" if margen_extra_btc else ""),
+        f"Margen BTC — posición: {posicion_btc:.8f} BTC" + (f" | extra: {margen_extra_btc:.8f} BTC" if margen_extra_btc else ""),
         f"Margen BTC total: {margen_total_btc:.8f} BTC",
-        f"Liquidación estimada (aprox., no exacta): {'$' + format(liquidacion, ',.2f') if liquidacion else 's/d'}",
+        f"Liquidación estimada: {'$' + format(liquidacion, ',.2f') if liquidacion else 's/d'}",
     ]
     if price:
         lines.append(f"Precio BTC/USD actual: ${price:,.2f} (Kraken, {_hora_actual_ar()})")
@@ -491,7 +495,7 @@ def format_confirmacion_message(result):
     return (
         f"✅ {result['id']} registrada.\n"
         f"BTC depositado ahora: {result['btc_depositado']:.8f} BTC\n"
-        f"Nuevo promedio (contrato inverso): {promedio_txt}\n"
+        f"Nuevo promedio: {promedio_txt}\n"
         f"Margen BTC total: {result['margen_total_btc']:.8f} BTC\n"
         f"Balas usadas: {result['balas_usadas']}/{MAX_BALAS} (restantes: {result['balas_restantes']})\n\n"
         f"_Si algo no cierra, mandá \"/deshacer\" para revertir esta última carga._"
@@ -500,13 +504,12 @@ def format_confirmacion_message(result):
 
 def iniciar_estrategia(state, capital_total, precio_actual=None):
     """
-    Arranca la estrategia desde cero: fija el capital total (define el
-    tamaño de bala = capital/30) y calcula cuánto entrar en la carga
-    inicial (regla de "Inicio" de la planilla: 2 balas, no 1 como el resto
-    de los días con ROI positivo). El margen a depositar es en USD (fijo,
-    valor nominal de las balas) y también se muestra su equivalente en BTC
-    al precio actual, ya que la idea es comprar BTC con BTC. Rechaza si ya
-    hay una posición abierta, para no pisar datos reales por error.
+    Arranca el Cargador 1 desde cero: fija su capital (define el tamaño de
+    bala = capital/30) y calcula cuánto entrar en la carga inicial (regla
+    de "Inicio": 3 balas). El margen a depositar es en USD (fijo, valor
+    nominal de las balas) y también se muestra su equivalente en BTC al
+    precio actual, ya que la idea es comprar BTC con BTC. Rechaza si ya hay
+    una posición abierta, para no pisar datos reales por error.
     """
     if state.get("balas_usadas", 0) > 0:
         return {
@@ -536,8 +539,8 @@ def format_inicio_message(result):
     if not result["ok"]:
         return f"🛑 {result['motivo']}"
     lines = [
-        "🚀 *Estrategia MS iniciada*",
-        f"Capital total: USD {result['capital_total']:,.2f} en {MAX_BALAS} balas de "
+        "🚀 *MS — Cargador 1 iniciado*",
+        f"Capital: USD {result['capital_total']:,.2f} en {MAX_BALAS} balas de "
         f"USD {result['bala_size']:,.2f} c/u.",
         f"Regla de Inicio: {result['balas_inicio']} balas de entrada.",
     ]
@@ -550,9 +553,7 @@ def format_inicio_message(result):
     lines.append(f"Tamaño de posición resultante ({LEVERAGE}x en el exchange): USD {result['tamano_posicion_usd']:,.2f}.")
     lines.append(
         f"\nCuando compres el BTC y abras la posición, mandame \"Metí "
-        f"{result['balas_inicio']} balas a PRECIO\" con el precio real al que "
-        f"entraste, y lo registro (el BTC de arriba es solo una referencia al "
-        f"precio de AHORA — el monto real se fija con el precio de tu operación)."
+        f"{result['balas_inicio']} balas a PRECIO\" con el precio real al que entraste."
     )
     return "\n".join(lines)
 
@@ -622,14 +623,12 @@ def format_cierre_message(result):
     return (
         f"🏁 *{result['id']} — Estrategia MS cerrada*\n"
         f"Precio de cierre: ${result['precio_cierre']:,.2f}\n"
-        f"Promedio de entrada (contrato inverso): ${result['promedio_inverso']:,.2f}\n"
-        f"ROI final (BTC, contrato inverso): {result['roi_pct']:+.2f}%\n"
+        f"Promedio de entrada: ${result['promedio_inverso']:,.2f}\n"
+        f"ROI final: {result['roi_pct']:+.2f}%\n"
         f"PnL estimado: {result['pnl_btc']:+.8f} BTC\n"
         f"Margen total antes del cierre: {result['margen_total_btc']:.8f} BTC\n"
-        f"BTC final estimado (margen + PnL): {result['btc_final_estimado']:.8f} BTC\n\n"
-        f"_Estimación aproximada — no incluye funding/fees reales del exchange, "
-        f"confirmá el resultado real ahí. Balas usadas antes de cerrar: "
-        f"{result['balas_usadas_anteriores']}. Para arrancar de nuevo: "
+        f"BTC final estimado: {result['btc_final_estimado']:.8f} BTC\n\n"
+        f"_Confirmá el resultado real en el exchange. Para arrancar de nuevo: "
         f"\"/saylor_iniciar <capital_total>\"._"
     )
 
