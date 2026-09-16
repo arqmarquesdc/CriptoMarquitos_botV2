@@ -148,6 +148,15 @@ RCI_LT_PERIOD = 12
 # algo queda roto de verdad.
 ERROR_ALERT_THRESHOLD = 3
 
+# Marcos pidió (12/09) apagar las alertas de trading de corto plazo H4/H1 y
+# las de cambio de tendencia D1/W1 — por ahora solo quiere recibir MS y DS.
+# El código de esa capa queda intacto (por si algún día se reactiva), esta
+# bandera simplemente la desactiva sin tocar nada más: no corre los checks
+# H4c/H1c/D1_trend/W1_trend ni manda el reporte semanal (que es sobre esa
+# capa). Los comandos/botones de MS y DS y el resto del bot siguen andando
+# igual, process_telegram_updates no depende de esto.
+ALERTAS_TRADING_ACTIVAS = False
+
 # Nota: la API de Binance (api.binance.com) devuelve error 451 (bloqueo legal
 # por región) para las IPs de los runners de GitHub Actions, así que usamos
 # la API pública de Kraken, que no tiene esa restricción.
@@ -924,43 +933,25 @@ def send_telegram_message(text, reply_markup=None):
 
 
 def build_help_message():
+    # Nota: la capa de trading H4/H1/M15 está apagada (ALERTAS_TRADING_ACTIVAS
+    # = False) — Marcos pidió (12/09) recibir solo MS y DS, así que el menú no
+    # la menciona. /estado sigue andando por si hace falta diagnosticar el bot.
     return (
         "👋 *¿Qué puedo hacer?*\n\n"
-        "📈 *Trading BTC* (las señales automáticas de H4/H1 + M15)\n"
-        "/estado → te dice si el bot está corriendo bien: cuándo corrió por "
-        "última vez, si hay algún sesgo activo esperando confirmación, y si "
-        "hubo errores.\n\n"
-        "₿ *Estrategia MS* (acumulación de BTC estilo Michael Saylor)\n"
-        "/saylor_iniciar <capital_total> → arranca la estrategia de cero: "
-        "vos le decís cuánta plata total destinás, y te calcula el tamaño "
-        "de bala y cuánto entrar en la carga inicial (2 balas).\n"
-        "/saylor → tu estado actual: cuánto BTC acumulaste, tu precio "
-        "promedio de compra, el margen cargado y a qué precio se liquidaría "
-        "la posición.\n"
-        "/chequeo → chequeo al toque: precio de BTC ahora, tu ROI en este "
-        "momento, y si conviene recargar según la tabla (te dice cuántas "
-        "balas agregar).\n"
-        "/saylor_cerrar <precio> → cierra la posición a ese precio: te "
-        "calcula el ROI/PnL final y deja todo listo para arrancar de nuevo. "
-        "A partir de +10% de ROI ya te aviso que evalúes cerrarla.\n"
-        "/deshacer → si cargaste mal una recarga, la deshace y vuelve al "
-        "estado anterior.\n"
-        "Cada día te mando el chequeo con un botón \"✅ Ya la cargué\" — lo "
-        "tocás cuando ya hiciste la recarga en el exchange, te pido el "
-        "precio, se lo mandás (solo el número) y queda registrada sola.\n\n"
-        "📊 *Estrategia DS* (Doble Saylor — MSTR apalancado en Bitget)\n"
-        "/ds → tu estado actual: balas usadas, precio de entrada, margen "
-        "real y el rendimiento estimado ahora.\n"
-        "/ds_chequeo → chequea el rendimiento ya mismo (busca el precio de "
-        "MSTR solo, o le pasás uno a mano: \"/ds_chequeo 130.50\").\n"
-        "/ds_deshacer → deshace la última bala cargada por error.\n"
-        "Cuando el rendimiento cruce -40%, te aviso solo con un botón "
-        "\"✅ Ya la sumé\" para la bala 2 — mismo mecanismo: lo tocás, "
-        "mandás el precio, y queda registrada (montos ya calculados). "
-        "También podés cargarla a mano con \"/ds_bala2 <precio> [margen_usdt] "
-        "[tamaño_mstr]\" si preferís poner los datos reales del exchange.\n\n"
-        "Escribí \"hola\" cuando quieras volver a ver este menú, o "
-        "\"cancelar\" si te pedí un precio y no querés mandarlo."
+        "₿ *Estrategia MS*\n"
+        "/saylor_iniciar <capital> → arranca de cero, calcula bala y carga inicial.\n"
+        "/saylor → tu estado: BTC acumulado, promedio, margen, liquidación.\n"
+        "/chequeo → precio y ROI ahora, y si conviene recargar.\n"
+        "/saylor_cerrar <precio> → cierra la posición y calcula el resultado.\n"
+        "/deshacer → revierte la última carga.\n\n"
+        "📊 *Estrategia DS*\n"
+        "/ds → tu estado: balas, entrada, margen real, rendimiento.\n"
+        "/ds_chequeo → rendimiento ahora (con precio a mano o automático).\n"
+        "/ds_deshacer → revierte la última bala.\n"
+        "/ds_bala2 <precio> [margen_usdt] [tamaño_mstr] → carga a mano.\n\n"
+        "Cada carga sugerida te llega con un botón para confirmarla — lo "
+        "tocás, te pido el precio, lo mandás y queda registrada sola.\n\n"
+        "\"hola\" reabre este menú, \"cancelar\" descarta un precio pedido."
     )
 
 
@@ -1543,25 +1534,27 @@ def run_once():
     except Exception as e:
         print(f"[ERROR] [telegram_updates] {e}")
 
-    checks = [
-        ("H4c", lambda: check_h4_entry(state, trades)),
-        ("H1c", lambda: check_h1_entry(state, trades)),
-        ("D1_trend", lambda: check_regime_change(
-            state, trades, TREND_TIMEFRAME, EMA_TREND_FAST, EMA_TREND_SLOW, RCI_TREND_PERIOD,
-            horizon_label="Diario",
-            note=("Aviso de cambio de régimen de mercado de fondo (poco frecuente, no es una "
-                  "entrada inmediata como M15/H1/H4). Útil para decidir si conviene operar a favor "
-                  "o en contra de la tendencia mayor."),
-        )),
-        ("W1_trend", lambda: check_regime_change(
-            state, trades, LONGTERM_TIMEFRAME, EMA_LT_FAST, EMA_LT_SLOW, RCI_LT_PERIOD,
-            horizon_label="Semanal — visión de largo plazo",
-            note=("Visión de largo plazo (meses/años), pensada para decisiones de inversión, no "
-                  "de trading. Kraken no ofrece velas mensuales nativas, así que se usa la "
-                  "Semanal como la temporalidad práctica más larga disponible."),
-            klines_limit=500,
-        )),
-    ]
+    checks = []
+    if ALERTAS_TRADING_ACTIVAS:
+        checks = [
+            ("H4c", lambda: check_h4_entry(state, trades)),
+            ("H1c", lambda: check_h1_entry(state, trades)),
+            ("D1_trend", lambda: check_regime_change(
+                state, trades, TREND_TIMEFRAME, EMA_TREND_FAST, EMA_TREND_SLOW, RCI_TREND_PERIOD,
+                horizon_label="Diario",
+                note=("Aviso de cambio de régimen de mercado de fondo (poco frecuente, no es una "
+                      "entrada inmediata como M15/H1/H4). Útil para decidir si conviene operar a favor "
+                      "o en contra de la tendencia mayor."),
+            )),
+            ("W1_trend", lambda: check_regime_change(
+                state, trades, LONGTERM_TIMEFRAME, EMA_LT_FAST, EMA_LT_SLOW, RCI_LT_PERIOD,
+                horizon_label="Semanal — visión de largo plazo",
+                note=("Visión de largo plazo (meses/años), pensada para decisiones de inversión, no "
+                      "de trading. Kraken no ofrece velas mensuales nativas, así que se usa la "
+                      "Semanal como la temporalidad práctica más larga disponible."),
+                klines_limit=500,
+            )),
+        ]
 
     for label, fn in checks:
         try:
@@ -1649,6 +1642,8 @@ def format_weekly_report(trades, now_ms):
 def send_weekly_report():
     """Manda el reporte semanal por Telegram. Pensado para correr desde un
     workflow de GitHub Actions aparte, con su propio cron semanal."""
+    if not ALERTAS_TRADING_ACTIVAS:
+        return  # capa de trading apagada — no tiene sentido un reporte de 0 señales
     trades = load_trades()
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     send_telegram_message(format_weekly_report(trades, now_ms))
