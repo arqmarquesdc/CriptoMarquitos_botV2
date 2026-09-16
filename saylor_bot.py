@@ -104,6 +104,16 @@ def _hora_actual_ar():
     return datetime.now(_AR_TZ).strftime("%H:%M hs")
 
 
+def _fmt_balas(n):
+    """7.0 -> "7", 2.5 -> "2.5" — evita el ".0" final en los mensajes."""
+    return f"{n:g}"
+
+
+def _usd_sin_palanca(balas_usadas, state):
+    """USD que representan las balas usadas, sin apalancar (balas × tamaño de bala)."""
+    return balas_usadas * bala_size(state)
+
+
 def balas_a_agregar(roi_pct):
     """
     Tabla de recarga diaria según ROI % no realizado estimado. Devuelve
@@ -273,16 +283,17 @@ def format_daily_check_message(state, price):
     total_balas_hoy = balas_posicion + balas_margen
     balas_usd_hoy = round(total_balas_hoy * size, 2)
     btc_a_depositar_hoy = round(balas_usd_hoy / price, 8)
-    balas_restantes = MAX_BALAS - balas_usadas - total_balas_hoy
+    balas_restantes_actual = MAX_BALAS - balas_usadas
+    balas_restantes_tras_hoy = balas_restantes_actual - total_balas_hoy
 
     avisos = []
     if cerca_de_limite(roi):
         avisos.append("⚠️ El ROI está cerca de un límite de la tabla — confirmá el ROI real del exchange antes de recargar.")
-    if balas_restantes < 0:
+    if balas_restantes_tras_hoy < 0:
         capital_total = state.get("capital_total") or CAPITAL_TOTAL_DEFAULT
         avisos.append(f"🛑 Esta recarga superaría el límite de {MAX_BALAS} balas / USD {capital_total:,.0f}. Revisá antes de ejecutar.")
-    elif balas_restantes <= 3:
-        avisos.append(f"⚠️ Quedan pocas balas ({balas_restantes}) para futuras recargas.")
+    elif balas_restantes_tras_hoy <= 3:
+        avisos.append(f"⚠️ Quedan pocas balas ({_fmt_balas(balas_restantes_tras_hoy)}) para futuras recargas.")
     nota = nota_cierre(roi)
     if nota:
         avisos.append(nota)
@@ -301,7 +312,9 @@ def format_daily_check_message(state, price):
         f"ROI estimado: {roi:+.2f}%",
         f"Recarga sugerida: {recarga_txt}",
         f"Equivale a: {balas_usd_hoy:,.2f} USD → ≈{btc_a_depositar_hoy:.4f} BTC de margen",
-        f"Balas usadas: {balas_usadas} → quedarían {balas_restantes} de {MAX_BALAS}",
+        f"Balas usadas: {_fmt_balas(balas_usadas)}/{MAX_BALAS} (restantes: {_fmt_balas(balas_restantes_actual)}) "
+        f"→ USD {_usd_sin_palanca(balas_usadas, state):,.2f} sin palanca",
+        f"Después de esta recarga quedarían: {_fmt_balas(balas_restantes_tras_hoy)}",
     ]
     if avisos:
         lines.append("")
@@ -315,6 +328,8 @@ def _format_log_line(entry):
     if tipo == "cierre":
         return (f"— {eid} (cierre): precio ${entry['precio_cierre']:,.2f}, "
                 f"ROI {entry['roi_pct']:+.2f}%, PnL {entry['pnl_btc']:+.4f} BTC")
+    if tipo == "ajuste_promedio":
+        return f"— {eid} (ajuste): promedio → ${entry['promedio_nuevo']:,.2f}"
     etiqueta = "margen extra" if tipo == "margen_extra" else "posición"
     return (f"— {eid} ({etiqueta}): {entry['balas_confirmadas']} balas a "
             f"${entry['precio_confirmado']:,.2f} → {entry['btc_depositado']:.4f} BTC")
@@ -335,7 +350,8 @@ def format_status_message(state, price=None):
         "📊 *Estado — Estrategia Saylor BTC*",
         f"Día: {dia if dia is not None else 's/d'}",
         f"Promedio: {'$' + format(promedio_inverso, ',.2f') if promedio_inverso else 's/d'}",
-        f"Balas usadas: {balas_usadas}/{MAX_BALAS} (restantes: {MAX_BALAS - balas_usadas})",
+        f"Balas usadas: {_fmt_balas(balas_usadas)}/{MAX_BALAS} (restantes: {_fmt_balas(MAX_BALAS - balas_usadas)}) "
+        f"→ USD {_usd_sin_palanca(balas_usadas, state):,.2f} sin palanca",
         f"Margen BTC — posición: {posicion_btc:.4f} BTC" + (f" | extra: {margen_extra_btc:.4f} BTC" if margen_extra_btc else ""),
         f"Margen BTC total: {margen_total_btc:.4f} BTC",
         f"Liquidación estimada: {'$' + format(liquidacion, ',.2f') if liquidacion else 's/d'}",
@@ -460,7 +476,54 @@ def confirmar_recarga(state, balas_confirmadas, precio_confirmado, es_margen_ext
         "margen_total_btc": _margen_total_btc(state),
         "balas_usadas": state["balas_usadas"],
         "balas_restantes": MAX_BALAS - state["balas_usadas"],
+        "usd_sin_palanca": _usd_sin_palanca(state["balas_usadas"], state),
     }
+
+
+def ajustar_promedio_entrada(state, promedio_nuevo):
+    """
+    Recalibra el promedio de entrada al valor real que muestra el exchange
+    (comando "/saylor_promedio <precio>"). Ajusta solo posicion_btc_acumulado
+    — NO toca posicion_usd_acumulado (la cuenta de balas/USD nominal
+    invertido no cambia) — así que el ROI/liquidación quedan exactos frente
+    a fees/slippage acumulados, sin afectar el límite de 30 balas.
+    """
+    posicion_usd = state.get("posicion_usd_acumulado", 0.0)
+    if not posicion_usd:
+        return {"ok": False, "motivo": "No hay ninguna posición cargada todavía — no hay promedio para ajustar."}
+
+    state["_previous_snapshot"] = copy.deepcopy({k: v for k, v in state.items() if k != "_previous_snapshot"})
+    promedio_anterior = calcular_promedio_inverso(posicion_usd, state.get("posicion_btc_acumulado", 0.0))
+    state["posicion_btc_acumulado"] = round(posicion_usd / promedio_nuevo, 8)
+
+    op_id = _siguiente_id_operacion(state)
+    state.setdefault("log", []).append({
+        "id": op_id,
+        "fecha": datetime.now(timezone.utc).isoformat(),
+        "tipo": "ajuste_promedio",
+        "promedio_anterior": promedio_anterior,
+        "promedio_nuevo": promedio_nuevo,
+    })
+
+    return {
+        "ok": True,
+        "id": op_id,
+        "promedio_anterior": promedio_anterior,
+        "promedio_nuevo": promedio_nuevo,
+        "margen_total_btc": _margen_total_btc(state),
+    }
+
+
+def format_ajuste_promedio_message(result):
+    if not result["ok"]:
+        return f"🛑 {result['motivo']}"
+    anterior_txt = f"${result['promedio_anterior']:,.2f}" if result["promedio_anterior"] else "s/d"
+    return (
+        f"✅ {result['id']} — promedio ajustado.\n"
+        f"Antes: {anterior_txt} → Ahora: ${result['promedio_nuevo']:,.2f}\n"
+        f"Margen BTC total: {result['margen_total_btc']:.4f} BTC\n\n"
+        f"_Si algo no cierra, mandá \"/deshacer\" para revertir este ajuste._"
+    )
 
 
 def deshacer_ultima_recarga(state):
@@ -487,7 +550,8 @@ def format_confirmacion_message(result):
             f"✅ {result['id']} registrada como margen extra (colchón, no suma exposición).\n"
             f"BTC depositado ahora: {result['btc_depositado']:.4f} BTC\n"
             f"Margen BTC total (posición + extra): {result['margen_total_btc']:.4f} BTC\n"
-            f"Balas usadas: {result['balas_usadas']}/{MAX_BALAS} (restantes: {result['balas_restantes']})\n\n"
+            f"Balas usadas: {_fmt_balas(result['balas_usadas'])}/{MAX_BALAS} (restantes: {_fmt_balas(result['balas_restantes'])}) "
+            f"→ USD {result['usd_sin_palanca']:,.2f} sin palanca\n\n"
             f"_Si algo no cierra, mandá \"/deshacer\" para revertir esta última carga._"
         )
 
@@ -497,7 +561,8 @@ def format_confirmacion_message(result):
         f"BTC depositado ahora: {result['btc_depositado']:.4f} BTC\n"
         f"Nuevo promedio: {promedio_txt}\n"
         f"Margen BTC total: {result['margen_total_btc']:.4f} BTC\n"
-        f"Balas usadas: {result['balas_usadas']}/{MAX_BALAS} (restantes: {result['balas_restantes']})\n\n"
+        f"Balas usadas: {_fmt_balas(result['balas_usadas'])}/{MAX_BALAS} (restantes: {_fmt_balas(result['balas_restantes'])}) "
+        f"→ USD {result['usd_sin_palanca']:,.2f} sin palanca\n\n"
         f"_Si algo no cierra, mandá \"/deshacer\" para revertir esta última carga._"
     )
 
@@ -659,6 +724,20 @@ def handle_message(text):
         if result["ok"]:
             save_saylor_state(state)
         return format_inicio_message(result)
+
+    if lower.startswith("/saylor_promedio"):
+        partes = stripped.split()
+        if len(partes) < 2:
+            return "Uso: /saylor_promedio <precio>\nEj: /saylor_promedio 76836.50"
+        try:
+            promedio_nuevo = parse_price_ar(partes[1])
+        except ValueError:
+            return "No pude leer el precio — uso: /saylor_promedio <precio>"
+        state = load_saylor_state()
+        result = ajustar_promedio_entrada(state, promedio_nuevo)
+        if result["ok"]:
+            save_saylor_state(state)
+        return format_ajuste_promedio_message(result)
 
     if lower.startswith("/saylor_cerrar"):
         partes = stripped.split()
