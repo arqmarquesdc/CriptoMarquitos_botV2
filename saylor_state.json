@@ -1,9 +1,9 @@
 {
   "capital_total": 8000.0,
   "start_date": "2026-09-12",
-  "balas_usadas": 14.0,
-  "posicion_usd_acumulado": 3733.38,
-  "posicion_btc_acumulado": 0.04862343,
+  "balas_usadas": 15.0,
+  "posicion_usd_acumulado": 4000.05,
+  "posicion_btc_acumulado": 0.05204228,
   "margen_extra_btc_acumulado": 0.0,
   "log": [
     {
@@ -59,15 +59,23 @@
       "precio_confirmado": 77730.0,
       "btc_depositado": 0.00686144,
       "tipo": "posicion"
+    },
+    {
+      "id": "MS-07",
+      "fecha": "2026-09-18T11:42:26.135716+00:00",
+      "balas_confirmadas": 1,
+      "precio_confirmado": 78000.0,
+      "btc_depositado": 0.00341885,
+      "tipo": "posicion"
     }
   ],
-  "contador_operaciones": 6,
+  "contador_operaciones": 7,
   "_previous_snapshot": {
     "capital_total": 8000.0,
     "start_date": "2026-09-12",
-    "balas_usadas": 12.0,
-    "posicion_usd_acumulado": 3200.04,
-    "posicion_btc_acumulado": 0.04176199,
+    "balas_usadas": 14.0,
+    "posicion_usd_acumulado": 3733.38,
+    "posicion_btc_acumulado": 0.04862343,
     "margen_extra_btc_acumulado": 0.0,
     "log": [
       {
@@ -115,8 +123,16 @@
         "precio_confirmado": 76000.0,
         "btc_depositado": 0.01052645,
         "tipo": "posicion"
+      },
+      {
+        "id": "MS-06",
+        "fecha": "2026-09-17T17:34:26.996586+00:00",
+        "balas_confirmadas": 2,
+        "precio_confirmado": 77730.0,
+        "btc_depositado": 0.00686144,
+        "tipo": "posicion"
       }
     ],
-    "contador_operaciones": 5
+    "contador_operaciones": 6
   }
 }
