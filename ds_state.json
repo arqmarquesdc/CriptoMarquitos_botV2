@@ -1,6 +1,6 @@
 {
   "capital_total": 1200.0,
-  "balas_usadas": 2,
+  "balas_usadas": 1,
   "log": [
     {
       "id": "DS-01",
@@ -13,40 +13,9 @@
       "margen_usdt_real": 598.09,
       "tamano_mstr_real": 8.99,
       "liquidacion_exchange": 66.2
-    },
-    {
-      "id": "DS-02",
-      "fecha": "2026-09-19T12:23:02.766070+00:00",
-      "bala": 2,
-      "precio_entrada": 156.48,
-      "bala_size_usd": 600.0,
-      "trade_usd_teorico": 120.0,
-      "margen_usd_teorico": 480.0,
-      "margen_usdt_real": 313.94,
-      "tamano_mstr_real": 3.96,
-      "liquidacion_exchange": null
     }
   ],
-  "_previous_snapshot": {
-    "capital_total": 1200.0,
-    "balas_usadas": 1,
-    "log": [
-      {
-        "id": "DS-01",
-        "fecha": "2026-09-12T00:00:00+00:00",
-        "bala": 1,
-        "precio_entrada": 131.36,
-        "bala_size_usd": 600.0,
-        "trade_usd_teorico": 120.0,
-        "margen_usd_teorico": 480.0,
-        "margen_usdt_real": 598.09,
-        "tamano_mstr_real": 8.99,
-        "liquidacion_exchange": 66.2
-      }
-    ],
-    "_alerta_rendimiento_activa": false,
-    "contador_operaciones": 1
-  },
   "_alerta_rendimiento_activa": false,
-  "contador_operaciones": 2
+  "contador_operaciones": 1,
+  "_previous_snapshot": null
 }
